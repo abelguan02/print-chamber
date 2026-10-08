@@ -1,0 +1,29 @@
+当前基线
+用户确认日期：2026-10-07
+
+插件方向基线确认
+用户已确认本聊天的 Print Chamber 0.1.1 作为后续方向。
+快照位置：baselines/print-chamber-0.1.1-20261007/
+文件范围、SHA-256 与排除项见快照的 manifest.json 和 基线说明.txt。
+不合并其他聊天实验。design-preview/、start-design-preview.command 不属于本基线。
+真实 ArtStation 作品页尚未验证通过；采用方向不等于该问题已验收。
+
+决定
+保留旧版作为基线，不采用 prompt-fidelity-v2.txt 或 prompt-fidelity-v3.txt。这两轮结果仅留作失败实验记录，不作为默认提示词或默认预览。
+
+统一提示词基线
+benchmark_local.py 中的默认 PROMPT。
+第 1 张：output/local-20261007-112425/preview-464x736-1.jpg
+第 2 张：output/local-20261007-112439/preview-768x432-1.jpg
+第 4 张：output/local-20261007-112451/preview-512x640-1.jpg
+第 5 张：output/local-20261007-112502/preview-768x432-1.jpg
+
+另行保留的第 3 张已认可参考
+output/local-20261007-111710/preview-432x768-2.jpg
+该图使用 prompt-preserve.txt 的角色专用提示词，不属于统一提示词验证结果。
+
+已知限制
+保留基线不表示所有图片质量通过。第 1 张偏暗，第 2 张表情改变，第 5 张面罩缺失等问题仍存在。新提示词虽改变局部问题，却损伤其他设计与氛围，不能视为整体改善。
+
+工作边界
+用户后续已授权开发插件。沿用上述旧版提示词；不自动继续提示词迭代。

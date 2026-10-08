@@ -1,0 +1,34 @@
+Print Chamber 0.1.1 确认基线
+日期：2026-10-07
+来源：本聊天的插件实现及 ArtStation 悬停修正。不是其他聊天的视觉实验。
+
+采用方向
+本地 FLUX.2 klein 4B 常驻推理；旧版通用提示词。
+简化打印舱、完整图片自下向上显现。
+悬停延迟触发、移入弹窗保持、离开延迟收起、固定与关闭。
+支持普通图片、遮罩下图片、单张 CSS 背景图、延迟加载图片识别。
+设置中提供“启用当前页”和注入状态提示。
+
+对应文件
+extension/ 下六个插件文件。
+service.py、benchmark_local.py、start-local.command、demo.html。
+test-browser.cjs、test-site-cards.cjs、inspect-artstation.cjs。
+使用说明.txt、开发验收.txt、ArtStation修复说明.txt、BASELINE.txt。
+manifest.json 列出每个归档文件的相对路径和 SHA-256。
+
+验证状态
+历史本地画廊非结果缓存一次从悬停至显示完成约 3.5 秒；模型已预加载。
+悬停、固定、关闭、窄屏、错误处理、模拟站点卡片测试通过。
+真实 ArtStation 访问被验证页挡住，没有确认用户实际作品页已修复。
+
+排除项
+design-preview/、start-design-preview.command，以及其他聊天实验。
+prompt-fidelity-v2.txt、prompt-fidelity-v3.txt：未采用。
+prompt-preserve.txt：角色专用，不作为默认提示词。
+output/：实验产物可被后续运行更新，不归入代码快照。
+.local/、连接码、日志、模型、Python 环境、缓存：不归档。
+
+维护与恢复
+保持此快照不变。后续认可版本使用新目录保存，不能覆盖此目录。
+恢复时先检查活动文件是否存在其他未保存修改，再按 manifest.json 的精确清单恢复，不能整目录覆盖工作区。
+本快照是源码归档，运行仍依赖本机已有的模型与 Python 环境。

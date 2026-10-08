@@ -1,0 +1,51 @@
+角色原画 3D 预览的五秒验证方案
+日期：2026-10-07
+
+结论
+更新：已复用本地 FLUX.2 klein 4B 完成六次离线测试，优先路线改为本地推理，云 API 仅作可选。432×768 的四次处理为 2.45–2.79 秒，但设计保真度未通过，且尚未接入浏览器。详见 local-validation.txt；以下云端内容保留为候选调研记录。
+第一版生成图是用户认可的视觉基准。五秒低清预览有值得测试的候选路线，但尚未验证速度、设计保留程度或实际账单。当前目录没有现成实现，当前进程未配置 FAL_KEY 或 BFL_API_KEY；本次没有调用收费候选服务。
+
+已确定的产品要求
+浏览器悬停触发，首次看到可用图片的目标是五秒以内，允许低清。输出为当前视角的二次元角色 3D 风格图片，保留原设计，呈现明显体积、柔和光照与材质。用途是建模构思参考；不承诺准确结构，不包含旋转或模型导出。
+原先内置图像工具的第一版调用约 28.5 秒，第二版约 39.7 秒；这只是工具调用耗时，不是浏览器端到端测量，也没有返回可用计费数据。
+
+候选路线
+1. 优先测试 FLUX.2 klein 4B 图像编辑。
+   BFL 官方模型页列出约 1.2 秒 RTX 5090 推理、约 0.3 秒 GB200 推理；硬件、输入与运行条件会影响速度。这些数字不等于托管 API 的端到端延迟，不能外推到当前 Apple Silicon 电脑。
+   fal 的模型页标注 $0.01/MP，但页面没有充分说明输入是否另计和最低计费粒度，不据此推导低清单张价格。
+   https://bfl.ai/models/flux-2-klein
+   https://fal.ai/models/fal-ai/flux-2/klein/4b/edit
+   https://fal.ai/models/fal-ai/flux-2/klein/4b/edit/api
+2. 对照测试 FLUX.2 Flash Edit。
+   fal 页面标注输入和输出各 $0.005/MP，输入会调整到 1MP。页面举例：512×512 输入、1024×1024 输出共 $0.010。低清输出的最低计费与舍入规则仍需账单验证。
+   API 支持自定义宽高，每条边为 512 至 2048 像素。输出使用 JPEG，单次一张，关闭提示词扩展，保留默认安全检查。
+   https://fal.ai/models/fal-ai/flux-2/flash/edit
+   https://fal.ai/models/fal-ai/flux-2/flash/edit/api
+
+测试图片及拟定输出尺寸
+不裁切、不强行转正方形；尺寸按原比例近似取整。具体端点接受情况需预检。
+1. applegreed-web2.jpg：512×800；强透视手掌、手指数目、人物比例和靴子。
+2. harshal-magar-vodyanitsa.jpg：912×512；动漫脸、发饰、手势、法杖和背景分离。
+3. kirino-ttk-3.webp：512×928；第一版视觉基准，脸、头发、外套、肩甲和腰部饰件。
+4. mintflavor-mintflavor-cross-bow-weapon-bulls-eyes-muted-color-dark-tone-f478b23b-d023-4b10-9e32-fd60cd538df0-1.jpg：512×640；全身比例、黑色服装层次、武器轮廓和花朵。
+5. haiyang-ocean-sun-haiyang-ocean-sun-linework-copy-2-copy.webp：912×512；装甲分件、头盔、机械关节和紫色光效。
+所有源文件位于 /Users/abelguan/Downloads/。
+
+统一的初始编辑提示词
+Convert this illustration into a polished stylized 3D anime game character render. Preserve the exact identity, anime facial proportions, expression, pose, camera, framing, silhouette, hair arrangement, clothing cuts, accessories, colors, and background composition. Change only rendering: sculpted dimensional hair, soft volumetric anime skin without pores, dimensional cloth folds, distinct fabric and metal materials, soft lighting and subtle contact shadows. Keep the original design intact. Avoid photorealistic human anatomy, redesign, missing accessories, hard flat cel shading, added objects, text, and cropping. One image.
+
+评价与执行顺序
+先对第 3 张用两个模型各运行一次，检验是否接近第一版的风格以及是否严重改脸、改姿势或改服装。明显不合格的路线停止，不用大规模重复调用掩盖质量问题。
+通过初筛后，用相同提示词、同一分辨率策略和固定种子，对五张图各测试三次。两个模型全部通过初筛时，后续共三十次调用；这是拟定计划，尚未执行，也不是用户已批准的消费预算。
+每次记录请求 ID、模型版本、种子、输入和输出尺寸、输入准备、上传、排队、推理、结果获取和浏览器解码显示时间。无法观测的阶段记为未知，不伪造分项耗时。
+浏览器最终验收从 pointerenter 起计时，包含停留触发阈值，到生成图完成解码并首次绘制为止。API 初筛耗时单独标记，不冒充完整体验耗时。
+报告每次耗时、五秒内成功比例、中位数及最大值。失败和超时保留在分母中；缓存命中另列。三十次只作为初筛，不声称构成生产稳定性证明。
+人工对照检查身份、姿势、轮廓、关键服装与饰件、3D 质感。低清允许微小纹理损失，不允许主要设计被替换。用户最终确认视觉合格。
+成本以服务账单为准，计入失败或重试中实际收费的请求；报告总费用除以视觉与时延均合格的预览数量，无合格结果时不计算有意义的单位成本。
+
+省成本的产品约束
+先采用约 250 毫秒停留阈值作为待验证默认值，这部分时间仍计入五秒。一次只处理当前图片，移走后未发送的任务直接丢弃；已提交任务不能假设可取消或免收费。相同源图、模型版本、尺寸和提示词版本的结果可缓存，缓存不用于伪装首次生成速度。第一版不预生成整页图片，不做自动反复重试。
+
+继续执行所需条件
+选择候选服务，并在本地安全配置相应 API 密钥（不要发到聊天）。核实账户余额与小批量测试预算后，执行真实测试。密钥保留在服务端或本地后端，不嵌入浏览器扩展。
+如果五秒达标但视觉质量不合格，则候选失败；如果视觉合格但超过五秒，也不能宣布满足当前目标。

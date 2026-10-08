@@ -1,0 +1,37 @@
+Print Chamber 0.2.0 — 设计稿还原
+
+唯一设计来源
+/Users/abelguan/Downloads/Print Chamber 设计稿.html
+原稿完整副本：design-reference/original.html
+五个页面的原始模板：design-reference/printer.html、states.html、site.html、popup.html、gallery.html
+build-design.cjs 从模板提取原始布局和内联样式，生成插件安全的静态页面，不加载设计工具的运行时。
+点阵 Doto 与 IBM Plex Mono 字体均提取自原稿，自带于插件，不请求远程字体。
+
+界面
+奶油色机身、进纸口、玻璃窗、金属打印头、点阵屏、状态灯、四个实体按键。
+打印机保持原稿 340 × 580 画布、300px 机身、270px 窗口；网页悬浮采用稿中的 0.8 倍尺寸，小窗口进一步等比缩小。
+连接面板与日常控制面板采用原稿 360px 布局。
+打印记录页沿用原稿排版，图片、数量、耗时与来源使用真实本地记录。
+
+交互
+默认停留 0.6 秒触发；可以改为按住 Option / Alt 悬停。
+可单独关闭当前网站。原图琥珀描边，缩略图滑入进纸口。
+接口返回前显示等待与扫描；接口返回完整图片后，自下而上揭示结果。
+等待阶段没有虚构百分比；百分比仅描述收到图片后的揭示动画。
+钉住：收起打印机，将打印图片加入网页右下角托盘；点照片放大，点托盘横条打开记录页。
+下载、复制图片、重新请求打印均接入实际功能。
+记录保存在浏览器本地，最多保留 48 张且总量约 7MB，超出后移除最早记录；清空浏览器插件数据会清除记录。
+生成服务和旧版统一提示词保持原样。
+
+更新方式
+在 chrome://extensions 找到 Print Chamber，点击“重新加载”。
+然后刷新已打开的 ArtStation / Behance / Pinterest 作品页，以替换旧内容脚本。
+扩展文件夹仍为：/Users/abelguan/Desktop/2Dto3DStyle/extension
+0.1.1 基线归档保留在 baselines/print-chamber-0.1.1-20261007，没有被修改。
+
+验收结果：新版界面交互测试、本地服务出图链路测试、模拟网站卡片识别回归测试均通过。
+详细记录：output/design-verification.json。
+实际本地结果截图：output/chamber-ready.png。
+原稿组件对照：output/reference-0.png 与 output/new-reference-comparison.png。
+新版控制面板及记录页：output/new-dashboard.png、output/new-gallery.png（验收图片数据）。
+模拟网站测试不等于真实 ArtStation 作品页已验收。

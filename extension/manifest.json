@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Print Chamber · 原画立体预览",
+  "version": "0.2.4",
+  "description": "悬停原画，在本机生成 3D 风格预览。",
+  "permissions": ["storage", "scripting", "clipboardWrite"],
+  "host_permissions": ["https://*/*", "http://127.0.0.1:8877/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_popup": "popup.html", "default_title": "Print Chamber"},
+  "content_scripts": [{
+    "matches": ["https://*.artstation.com/*", "https://*.behance.net/*", "https://*.pinterest.com/*", "http://127.0.0.1:8877/*"],
+    "js": ["chamber-markup.js", "chamber-style.js", "content.js"],
+    "run_at": "document_idle"
+  }],
+  "web_accessible_resources": [{"resources": ["fonts/*.woff2"], "matches": ["https://*.artstation.com/*", "https://*.behance.net/*", "https://*.pinterest.com/*", "http://127.0.0.1:8877/*"]}]
+}

@@ -1,0 +1,42 @@
+其余四张角色原画的统一提示词验证
+日期：2026-10-07
+
+结论
+同一通用提示词可以在四张图上生成明显的 3D 体积与材质效果，本轮每张单次低清处理均低于五秒。但不能稳定保留原设计，尤其第 5 张的头部装甲有重大改动。适合作为效果探索的候选；是否满足用户的大致预览用途，需用户看图判断。本轮未开发插件。
+
+方法
+复用已安装的本地 FLUX.2 klein 4B、MPS、bfloat16，4 步、guidance 1.0、seed 42。
+四张使用 benchmark_local.py 内完全相同的默认 PROMPT，没有按人物改写，没有额外图像描述模型，没有挑选重试结果。
+这条提示词是前一轮的通用基线，不是第 3 张已获认可样图的角色专用提示词。故本轮同时检验通用提示词能否迁移该风格，不能假设它已与认可样图等效。
+输出约 0.33MP，按原图比例取接近的 16 倍数宽高。缩小输入、读取与保存均计时，未做超分或后期修图。
+每张启动独立进程并预加载模型、编码相同提示词；下列逐图耗时不包含初始化，也不包含浏览器操作。每张只测一次，不构成稳定性统计。
+
+第 1 张 紫发角色和强透视手掌
+输出：464×736；耗时 3.834 秒；初始化另需 7.702 秒。
+文件：output/local-20261007-112425/preview-464x736-1.jpg
+指标：output/local-20261007-112425/metrics.json
+观察：保留了伸向镜头的大手、站姿、紫发、黑色服装与靴子，立体感明显。眼睛颜色、项链尖刺、衣服细节被改动或简化，整体偏暗且偏手办；灰色背景加入地面和投影。原图签名未被保留。
+
+第 2 张 蓝绿色长发角色和法杖
+输出：768×432；耗时 2.552 秒；初始化另需 6.284 秒。
+文件：output/local-20261007-112439/preview-768x432-1.jpg
+指标：output/local-20261007-112439/metrics.json
+观察：保留了主体位置、长发、花饰、手势、法杖大轮廓与月夜环境。张嘴表情变为闭嘴，眼睛和脸型改变，法杖通透发光质感变成了较不透明的纹理表面；服装细节也被简化。
+
+第 4 张 黑衣角色和玫瑰武器
+输出：512×640；耗时 2.430 秒；初始化另需 6.092 秒。
+文件：output/local-20261007-112451/preview-512x640-1.jpg
+指标：output/local-20261007-112451/metrics.json
+观察：保留短发、全身姿态、黑红服装、武器方向和玫瑰装饰，皮革与金属容易区分。粉色眼睛变为蓝色，耳饰、衣服绑带和武器零件有改动；白底变为灰色棚拍背景。整体设计意图尚可辨认，但不是结构准确参考。
+
+第 5 张 红色装甲角色
+输出：768×432；耗时 2.617 秒；初始化另需 5.792 秒。
+文件：output/local-20261007-112502/preview-768x432-1.jpg
+指标：output/local-20261007-112502/metrics.json
+观察：保留红色装甲、抬手姿势和紫色光球，但面罩及透明罩被移除，头发变为外露蓝紫发，眼睛、脸型、背部装甲与身体分件都有变化。属于显著重新设计，设计保留不合格。
+
+统一提示词原文
+Convert this illustration into a polished 3D anime game character render. Preserve the exact face identity, anime proportions, expression, pose, camera, framing, silhouette, hair, clothing design, accessories, colors and background. Change only rendering: sculpted dimensional hair, soft volumetric anime skin, dimensional cloth folds, distinct fabric and metal, soft lighting and contact shadows. Clearly three-dimensional, like a high-quality game character render. No redesign, photorealistic human face, flat cel shading, added objects or cropping.
+
+后续边界
+当前任务止于这四张的统一提示词测试。等待用户补充，不进入插件开发，也不据此增加自动逐图描述、微调或其他模型。

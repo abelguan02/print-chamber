@@ -1,0 +1,42 @@
+# Local environments, dependencies and caches
+.venv/
+venv/
+.cache/
+__pycache__/
+*.py[cod]
+node_modules/
+
+# Credentials and local runtime state
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+*.p12
+*.pfx
+.local/
+*.log
+
+# Generated outputs and operating-system metadata
+output/
+build/
+dist/
+*.app/
+*.dmg
+.DS_Store
+._*
+
+# Other-chat experiments: explicitly outside the accepted implementation
+/design-preview/
+/start-design-preview.command
+
+# Prompt experiments remain on disk, outside the 1.0 candidate snapshot
+/prompt-fidelity-v2.txt
+/prompt-fidelity-v3.txt
+/prompt-preserve.txt
+/test-eight-ab.py
+/test-eight-positive.py
+/test-eight-user-prompt.py
+/render-eight-ab.py
+/render-resolution-test.py

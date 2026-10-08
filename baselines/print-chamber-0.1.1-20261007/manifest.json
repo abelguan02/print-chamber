@@ -1,0 +1,26 @@
+{
+  "baseline": "print-chamber-0.1.1-20261007",
+  "version": "0.1.1",
+  "date": "2026-10-07",
+  "scope": "Current chat implementation only; other-chat experiments excluded",
+  "files": {
+    "ArtStation修复说明.txt": "3fee134e38cab84628e51e4c4cc3f601d44dc689a848d2ca0b75807304e2c21a",
+    "BASELINE.txt": "4564275ec6bcc84863cbc3b9c8bdf88e265af3ec8cb0a63ad73a5c6f0051e1ef",
+    "benchmark_local.py": "1a4c0823ace92e40aea2257c81eeccaf363b836f3063440fddc56f142eec8361",
+    "demo.html": "43788a31af6a0e1383dc693783bf8bf0eeb7a2e29a42febbd554af52cab98a6e",
+    "extension/background.js": "410418aa14ff57257e5bf12abaedee27b04bd56f6f4009cba6ead67f07f7f502",
+    "extension/chamber-style.js": "a9244055f70a05ee634b91acb77171697fd3d04cc6166476057be166c1a6bae8",
+    "extension/content.js": "6cf5b37db6068595de6c6c4feac9565abee378c6cd5177a68bece27f81c5713e",
+    "extension/manifest.json": "c76e541e9d4562233f34578619d196554171dda0e80b5604a809fc2439a67c10",
+    "extension/popup.html": "8e05cf1d47a43d992363ca1df44d3e04a5992123b0ac19a2e6e50e6f503eddd5",
+    "extension/popup.js": "116c471b639842e6517c6a5981a687fa57a5c4f94d870c4fdf7b06e691d04d59",
+    "inspect-artstation.cjs": "e8d30203a83dbd312163eaa53bafa2824871366948b572329dbcb932cf7bfaa6",
+    "service.py": "3954abf579892182f37b6a199a7448722a61a2523d9fc5f40c9ec4aa7b1e9eaf",
+    "start-local.command": "4f9cb13faeb314789fb894a6be88e1b4cb865cffd9b2a1acf1a53855cd755bd2",
+    "test-browser.cjs": "e59b2c09e586f7bbcfdf70e9952ad8bd039fb4ce18913accf66e5124ad3fc207",
+    "test-site-cards.cjs": "ffe45e327d8ef057ee5d541f27100c0c34cca08377b1cdd7d75cde260374067d",
+    "使用说明.txt": "6200d64c356d79a60039099c2be3324d5a061bc09d556eb60f7900541c5223ec",
+    "基线说明.txt": "d62c242a169eae6a0bc1274da76c83535248de0c170a0b2eda173822d2b1456e",
+    "开发验收.txt": "0c2bbe72cccdbbd0b3ac6f376ab2e1817ad5f84b1ff6b3917f3421effc7e0365"
+  }
+}

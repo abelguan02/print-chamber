@@ -1,0 +1,52 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>打印记录 · Print Chamber</title><link rel="stylesheet" href="pages.css"><body><div style="min-height: 100vh; background: rgb(244, 241, 236); color: rgb(59, 54, 44); font-family: &quot;PingFang SC&quot;, &quot;Noto Sans SC&quot;, system-ui, sans-serif;" id="gallery">
+  <div style="max-width: 1320px; margin: 0px auto; padding: 0px 24px 72px; box-sizing: border-box;">
+
+    <header style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; padding: 24px 0px;">
+      <div style="font-family: &quot;IBM Plex Mono&quot;, monospace; font-size: 12px; letter-spacing: 0.22em; color: rgb(94, 87, 74);">PRINT CHAMBER · PC-1</div>
+      <div style="display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 8px; background: rgb(21, 19, 15);" id="health">
+        <div style="width: 8px; height: 8px; border-radius: 50%; background: rgb(107, 214, 107); box-shadow: rgba(107, 214, 107, 0.6) 0px 0px 8px 2px;"></div>
+        <div style="font-family: Doto, VT323, monospace; font-weight: 800; font-size: 14px; letter-spacing: 0.08em; color: rgb(123, 224, 123);">READY</div>
+      </div>
+    </header>
+
+    <section style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 40px; padding: 24px 0px 48px;">
+      <div style="flex: 1 1 420px; display: flex; flex-direction: column; gap: 20px; max-width: 560px;">
+        <h1 style="margin: 0px; font-size: 52px; line-height: 1.15; font-weight: 700; letter-spacing: -0.01em;">让原画，<br>拥有另一种质感。</h1>
+        <p style="margin: 0px; font-size: 16px; line-height: 1.8; color: rgb(110, 102, 86);">在 ArtStation 上停在任何一张原画上，旁边的小打印机会把它一层层打印成立体的样子。打印过的作品都收在这里。</p>
+        <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+          <div style="padding: 10px 14px; border-radius: 8px; background: rgb(21, 19, 15); font-family: Doto, VT323, monospace; font-weight: 800; font-size: 16px; letter-spacing: 0.06em; color: rgb(244, 181, 58);" id="total">48 PRINTS</div>
+          <div style="padding: 10px 14px; border-radius: 8px; background: rgb(21, 19, 15); font-family: Doto, VT323, monospace; font-weight: 800; font-size: 16px; letter-spacing: 0.06em; color: rgb(244, 181, 58);" id="average">AVG 3.6S</div>
+        </div>
+      </div>
+      <div style="flex: 0 0 340px; display: flex; justify-content: center;">
+        <section id="hero-printer" class="panel"></section>
+      </div>
+    </section>
+
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 0px; border-top: 1px solid rgb(220, 212, 194);">
+      <h2 style="margin: 0px; font-size: 20px; font-weight: 600;">出纸托盘</h2>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+        <button style="height: 40px; padding: 0px 16px; border-radius: 9px; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; background: linear-gradient(rgb(246, 194, 90), rgb(224, 154, 34)); box-shadow: rgb(168, 111, 18) 0px 2px 0px, rgba(255, 255, 255, 0.6) 0px 1px 0px inset; color: rgb(58, 37, 8); font-family: inherit; font-size: 13px; cursor: pointer;" data-filter="all" aria-pressed="true">全部</button>
+        <button style="height: 40px; padding: 0px 16px; border-radius: 9px; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; background: linear-gradient(rgb(246, 240, 224), rgb(220, 209, 181)); box-shadow: rgb(176, 164, 131) 0px 2px 0px, rgb(255, 255, 255) 0px 1px 0px inset; color: rgb(59, 54, 44); font-family: inherit; font-size: 13px; cursor: pointer;" data-filter="ArtStation" aria-pressed="false">ArtStation</button>
+        <button style="height: 40px; padding: 0px 16px; border-radius: 9px; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; background: linear-gradient(rgb(246, 240, 224), rgb(220, 209, 181)); box-shadow: rgb(176, 164, 131) 0px 2px 0px, rgb(255, 255, 255) 0px 1px 0px inset; color: rgb(59, 54, 44); font-family: inherit; font-size: 13px; cursor: pointer;" data-filter="Behance" aria-pressed="false">Behance</button>
+        <button style="height: 40px; padding: 0px 16px; border-radius: 9px; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; background: linear-gradient(rgb(246, 240, 224), rgb(220, 209, 181)); box-shadow: rgb(176, 164, 131) 0px 2px 0px, rgb(255, 255, 255) 0px 1px 0px inset; color: rgb(59, 54, 44); font-family: inherit; font-size: 13px; cursor: pointer;" data-filter="Pinterest" aria-pressed="false">Pinterest</button>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 36px 28px; padding-top: 16px;" id="records"></div>
+
+  </div>
+</div><template id="record-template"><article style="display: flex; flex-direction: column; gap: 0px;">
+          <div style="padding: 10px 10px 0px; background: rgb(252, 250, 245); border-radius: 4px 4px 0px 0px; box-shadow: rgba(60, 45, 20, 0.16) 0px 10px 24px;">
+            <div style="height: 300px; border-radius: 2px; position: relative;">
+              <div style="position: absolute; inset: 0px; background: linear-gradient(125deg, rgba(255, 255, 255, 0.2), transparent 40%);"></div>
+            </div>
+            <div style="padding: 12px 4px 14px; display: flex; justify-content: space-between; align-items: center;">
+              <a href="#" style="font-size: 13px; text-decoration: none;">查看原作</a>
+              <span style="font-size: 12px; color: rgb(138, 130, 115);"></span>
+            </div>
+          </div>
+          <div style="padding: 8px 14px; background: rgb(21, 19, 15); border-radius: 0px 0px 4px 4px; display: flex; justify-content: space-between; font-family: Doto, VT323, monospace; font-weight: 800; font-size: 12px; letter-spacing: 0.06em; color: rgb(182, 174, 155);">
+            <span>JOB </span><span></span>
+          </div>
+        </article></template><dialog id="detail"><button id="dismiss" aria-label="关闭">×</button><img alt="打印结果"><a id="detail-download" download="print-chamber.jpg">下载图片</a></dialog><script src="chamber-markup.js"></script><script src="chamber-style.js"></script><script src="gallery.js"></script></body></html>

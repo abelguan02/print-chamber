@@ -1,0 +1,50 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Print Chamber</title><link rel="stylesheet" href="pages.css"><body class="popup"><div style="width: 360px; box-sizing: border-box; padding: 20px; border-radius: 18px; background: linear-gradient(rgb(239, 231, 210) 0%, rgb(228, 218, 192) 70%, rgb(214, 202, 170) 100%); box-shadow: rgba(255, 255, 255, 0.7) 0px 2px 0px inset, rgb(185, 173, 140) 0px 2px 0px, rgba(60, 45, 20, 0.25) 0px 24px 40px; display: flex; flex-direction: column; gap: 18px;" id="setup">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-family: &quot;IBM Plex Mono&quot;, monospace; font-size: 10px; letter-spacing: 0.2em; color: rgb(110, 102, 86);">PRINT CHAMBER · PC-1</div>
+        <div style="width: 14px; height: 14px; border-radius: 50%; background: rgb(42, 38, 32); display: flex; align-items: center; justify-content: center;"><div style="width: 8px; height: 8px; border-radius: 50%; background: rgb(244, 181, 58); box-shadow: rgba(244, 181, 58, 0.7) 0px 0px 8px 2px;"></div></div>
+      </div>
+      <div style="height: 64px; border-radius: 8px; background: rgb(21, 19, 15); box-shadow: rgba(0, 0, 0, 0.85) 0px 2px 8px inset, rgba(255, 255, 255, 0.6) 0px 1px 0px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;">
+        <div style="font-family: Doto, VT323, monospace; font-weight: 800; font-size: 24px; letter-spacing: 0.1em; color: rgb(244, 181, 58); text-shadow: rgba(244, 181, 58, 0.6) 0px 0px 8px;" id="setup-lcd">INSERT KEY</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <label for="token" style="font-size: 12px; color: rgb(94, 87, 74);">本地连接码</label>
+        <input id="token" placeholder="pc-xxxx-xxxx" style="height: 46px; box-sizing: border-box; border-radius: 8px; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; background: rgb(42, 38, 32); box-shadow: rgba(0, 0, 0, 0.7) 0px 3px 6px inset, rgba(255, 255, 255, 0.6) 0px 1px 0px; color: rgb(244, 238, 221); padding: 0px 14px; font-family: &quot;IBM Plex Mono&quot;, monospace; font-size: 14px; letter-spacing: 0.06em;" type="password">
+      </div>
+      <button style="height: 52px; border-radius: 10px; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; background: linear-gradient(rgb(246, 194, 90), rgb(224, 154, 34)); box-shadow: rgb(168, 111, 18) 0px 3px 0px, rgba(255, 255, 255, 0.6) 0px 1px 0px inset; color: rgb(58, 37, 8); font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer;" id="save">连接</button>
+      <div style="text-align: center; font-size: 12px; color: rgb(110, 102, 86);">连接码在菜单栏小助手中 · <a href="#help" id="help">怎么找？</a></div>
+    </div><div style="width: 360px; box-sizing: border-box; padding: 20px; border-radius: 18px; background: linear-gradient(rgb(239, 231, 210) 0%, rgb(228, 218, 192) 70%, rgb(214, 202, 170) 100%); box-shadow: rgba(255, 255, 255, 0.7) 0px 2px 0px inset, rgb(185, 173, 140) 0px 2px 0px, rgba(60, 45, 20, 0.25) 0px 24px 40px; display: flex; flex-direction: column; gap: 18px;" id="dashboard" hidden="">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-family: &quot;IBM Plex Mono&quot;, monospace; font-size: 10px; letter-spacing: 0.2em; color: rgb(110, 102, 86);">PRINT CHAMBER · PC-1</div>
+        <div style="width: 14px; height: 14px; border-radius: 50%; background: rgb(42, 38, 32); display: flex; align-items: center; justify-content: center;" id="connection-led"><div style="width: 8px; height: 8px; border-radius: 50%; background: rgb(107, 214, 107); box-shadow: rgba(107, 214, 107, 0.7) 0px 0px 8px 2px;"></div></div>
+      </div>
+      <div style="height: 64px; border-radius: 8px; background: rgb(21, 19, 15); box-shadow: rgba(0, 0, 0, 0.85) 0px 2px 8px inset, rgba(255, 255, 255, 0.6) 0px 1px 0px; padding: 0px 16px; display: flex; align-items: center; justify-content: space-between;">
+        <div style="font-family: Doto, VT323, monospace; font-weight: 800; font-size: 26px; letter-spacing: 0.1em; color: rgb(123, 224, 123); text-shadow: rgba(123, 224, 123, 0.55) 0px 0px 8px;" id="dashboard-lcd">READY</div>
+        <div style="text-align: right; font-family: Doto, VT323, monospace; font-weight: 800; font-size: 12px; line-height: 1.5; color: rgb(182, 174, 155);" id="model-info">MODEL OK<br>12 TODAY</div>
+      </div>
+
+      <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <div style="font-size: 15px; font-weight: 600;">在此网站启用</div>
+          <div style="font-family: &quot;IBM Plex Mono&quot;, monospace; font-size: 12px; color: rgb(110, 102, 86);" id="site">artstation.com</div>
+        </div>
+        <button aria-pressed="true" aria-label="在此网站启用" style="width: 76px; height: 44px; padding: 4px; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; border-radius: 10px; background: rgb(42, 38, 32); box-shadow: rgba(0, 0, 0, 0.7) 0px 2px 5px inset, rgba(255, 255, 255, 0.6) 0px 1px 0px; display: flex; cursor: pointer;" id="enabled">
+          <div style="flex: 1 1 0%; border-radius: 7px; display: flex; align-items: center; justify-content: center; font-family: &quot;IBM Plex Mono&quot;, monospace; font-size: 10px; color: rgb(110, 102, 86);">OFF</div>
+          <div style="flex: 1 1 0%; border-radius: 7px; background: linear-gradient(rgb(246, 194, 90), rgb(224, 154, 34)); box-shadow: rgba(255, 255, 255, 0.6) 0px 1px 0px inset, rgba(0, 0, 0, 0.5) 0px 2px 3px; display: flex; align-items: center; justify-content: center; font-family: &quot;IBM Plex Mono&quot;, monospace; font-size: 10px; font-weight: 500; color: rgb(58, 37, 8);">ON</div>
+        </button>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="font-size: 12px; color: rgb(94, 87, 74);">触发方式</div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0px, 1fr)); gap: 0px; padding: 4px; border-radius: 10px; background: rgb(42, 38, 32); box-shadow: rgba(0, 0, 0, 0.7) 0px 2px 5px inset, rgba(255, 255, 255, 0.6) 0px 1px 0px;">
+          <button style="height: 40px; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; border-radius: 7px; background: linear-gradient(rgb(246, 240, 224), rgb(220, 209, 181)); box-shadow: rgb(255, 255, 255) 0px 1px 0px inset, rgba(0, 0, 0, 0.5) 0px 2px 3px; color: rgb(59, 54, 44); font-family: inherit; font-size: 13px; cursor: pointer;" data-trigger="hover" aria-pressed="true">停留 0.6 秒</button>
+          <button style="height: 40px; border-width: medium; border-style: none; border-color: currentcolor; border-image: none; border-radius: 7px; background: transparent; color: rgb(182, 174, 155); font-family: inherit; font-size: 13px; cursor: pointer;" data-trigger="alt" aria-pressed="false">按住 ⌥ 悬停</button>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; font-size: 12px; color: rgb(94, 87, 74);"><span>出纸托盘</span><span style="font-family: &quot;IBM Plex Mono&quot;, monospace;">最近 4 张</span></div>
+        <div style="height: 92px; border-radius: 10px; background: linear-gradient(rgb(207, 195, 163), rgb(226, 216, 190)); box-shadow: rgba(0, 0, 0, 0.2) 0px 3px 6px inset; display: flex; align-items: flex-end; justify-content: center; gap: 10px; padding-bottom: 10px; box-sizing: border-box;" id="recent"></div>
+      </div>
+
+      <a href="gallery.html" style="height: 48px; border-radius: 10px; background: linear-gradient(rgb(246, 240, 224), rgb(220, 209, 181)); box-shadow: rgb(176, 164, 131) 0px 3px 0px, rgb(255, 255, 255) 0px 1px 0px inset; color: rgb(59, 54, 44); text-decoration: none; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 500;" target="_blank">打开打印记录 →</a>
+    </div><p id="status" role="status" hidden></p><div id="help-text" hidden>点击右上角打印机图标 → 启动模型，等待就绪，再点“复制插件连接码”并粘贴到这里。无需打开终端。</div><script src="popup.js"></script></body></html>
