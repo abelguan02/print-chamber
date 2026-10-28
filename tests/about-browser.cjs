@@ -27,6 +27,7 @@ test('About page: manifest version, links, clipboard feedback, responsive layout
   for(const width of [320,768,1024,1440]){
    await page.setViewportSize({width,height:1000});
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'No overflow at '+width);
+   if(width===320)await page.screenshot({path:path.join(root,'output/about-page-320.png'),fullPage:true});
   }
   await page.emulateMedia({reducedMotion:'reduce'});
   assert.equal(await page.locator('.ticker>div').evaluate(el=>getComputedStyle(el).animationName),'none');
@@ -35,9 +36,20 @@ test('About page: manifest version, links, clipboard feedback, responsive layout
   await page.setViewportSize({width:1024,height:1050});
   await page.screenshot({path:path.join(root,'output/about-page.png'),fullPage:true});
   assert.deepEqual(await page.locator('.tiles b').allTextContents(),['开源仓库','反馈与建议','自愿赞赏']);
-  assert.deepEqual(await page.locator('.tiles small').allTextContents(),['暂未开放','暂未开放','暂未开放']);
-  assert.equal(await page.locator('.tiles button:disabled').count(),3);
-  assert.equal(await page.locator('.tiles a').count(),0);
+  assert.deepEqual(await page.locator('.tiles small').allTextContents(),['GitHub','暂未开放','暂未开放']);
+  assert.equal(await page.locator('.tiles button:disabled').count(),2);
+  const repository=page.getByRole('link',{name:'开源仓库 GitHub',exact:true});
+  const repositoryURL='https://github.com/abelguan02/print-chamber';
+  assert.equal(await repository.getAttribute('href'),repositoryURL);
+  assert.equal(await repository.getAttribute('target'),'_blank');
+  assert.match(await repository.getAttribute('rel'),/noopener/);
+  await context.route(repositoryURL,r=>r.fulfill({contentType:'text/html',body:'<title>Repository navigation fixture</title>'}));
+  await repository.focus();
+  const [opened]=await Promise.all([context.waitForEvent('page'),page.keyboard.press('Enter')]);
+  await opened.waitForURL(repositoryURL);
+  assert.equal(await opened.evaluate(()=>window.opener),null);
+  assert.ok(page.url().endsWith('/about.html'),'Repository opens without replacing the About page');
+  await opened.close();
   await page.goto(base+'/settings.html');
   await page.locator('a[href="about.html"]').click();
   assert.ok(page.url().endsWith('/about.html'));
