@@ -36,20 +36,24 @@ test('About page: manifest version, links, clipboard feedback, responsive layout
   await page.setViewportSize({width:1024,height:1050});
   await page.screenshot({path:path.join(root,'output/about-page.png'),fullPage:true});
   assert.deepEqual(await page.locator('.tiles b').allTextContents(),['开源仓库','反馈与建议','自愿赞赏']);
-  assert.deepEqual(await page.locator('.tiles small').allTextContents(),['GitHub','暂未开放','暂未开放']);
-  assert.equal(await page.locator('.tiles button:disabled').count(),2);
-  const repository=page.getByRole('link',{name:'开源仓库 GitHub',exact:true});
-  const repositoryURL='https://github.com/abelguan02/print-chamber';
-  assert.equal(await repository.getAttribute('href'),repositoryURL);
-  assert.equal(await repository.getAttribute('target'),'_blank');
-  assert.match(await repository.getAttribute('rel'),/noopener/);
-  await context.route(repositoryURL,r=>r.fulfill({contentType:'text/html',body:'<title>Repository navigation fixture</title>'}));
-  await repository.focus();
-  const [opened]=await Promise.all([context.waitForEvent('page'),page.keyboard.press('Enter')]);
-  await opened.waitForURL(repositoryURL);
-  assert.equal(await opened.evaluate(()=>window.opener),null);
-  assert.ok(page.url().endsWith('/about.html'),'Repository opens without replacing the About page');
-  await opened.close();
+  assert.deepEqual(await page.locator('.tiles small').allTextContents(),['GitHub','Issues','暂未开放']);
+  assert.equal(await page.locator('.tiles button:disabled').count(),1);
+  for(const [name,url] of [
+   ['开源仓库 GitHub','https://github.com/abelguan02/print-chamber'],
+   ['反馈与建议 Issues','https://github.com/abelguan02/print-chamber/issues']
+  ]){
+   const link=page.getByRole('link',{name,exact:true});
+   assert.equal(await link.getAttribute('href'),url);
+   assert.equal(await link.getAttribute('target'),'_blank');
+   assert.match(await link.getAttribute('rel'),/noopener/);
+   await context.route(url,r=>r.fulfill({contentType:'text/html',body:'<title>GitHub navigation fixture</title>'}));
+   await link.focus();
+   const [opened]=await Promise.all([context.waitForEvent('page'),page.keyboard.press('Enter')]);
+   await opened.waitForURL(url);
+   assert.equal(await opened.evaluate(()=>window.opener),null);
+   assert.ok(page.url().endsWith('/about.html'),'Link opens without replacing the About page');
+   await opened.close();
+  }
   await page.goto(base+'/settings.html');
   await page.locator('a[href="about.html"]').click();
   assert.ok(page.url().endsWith('/about.html'));
