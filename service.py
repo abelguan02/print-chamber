@@ -14,10 +14,10 @@ from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
+from runtime_config import STATE, settings
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8877
-STATE = ROOT / '.local'
 STATE.mkdir(exist_ok=True, mode=0o700)
 KEY = STATE / 'token'
 if not KEY.exists():
@@ -30,6 +30,7 @@ failure = None
 cache = OrderedDict()
 pipe = None
 embeds = None
+prompt_hash = None
 
 SAMPLES = [
     'applegreed-web2.jpg', 'harshal-magar-vodyanitsa.jpg', 'kirino-ttk-3.webp',
@@ -38,31 +39,60 @@ SAMPLES = [
 ]
 
 def load():
-    global pipe, embeds, ready, failure
+    global pipe, embeds, ready, failure, prompt_hash
+    stage = 'dependencies'
     try:
         import torch
         from diffusers import Flux2KleinPipeline
         from benchmark_local import PROMPT
+        stage = 'device_check'
         if not torch.backends.mps.is_available():
-            raise RuntimeError('无法访问 Metal GPU，请从终端启动本地服务。')
+            raise RuntimeError('无法访问 Metal GPU，请检查模型运行环境及 macOS 权限。')
+        stage = 'model_load'
         pipe = Flux2KleinPipeline.from_pretrained(
-            os.environ.get('FLUX_MODEL_PATH', '/Users/abelguan/Models/FLUX.2-klein-4B'),
+            str(settings()['model']),
             torch_dtype=torch.bfloat16, local_files_only=True)
+        stage = 'prompt_encode'
         pipe.text_encoder.to('mps')
         with torch.inference_mode():
             embeds, _ = pipe.encode_prompt(prompt=PROMPT, device=torch.device('mps'), max_sequence_length=256)
+        prompt_hash = hashlib.sha256(PROMPT.encode('utf-8')).hexdigest()
         torch.mps.synchronize()
         pipe.text_encoder.to('cpu')
         pipe.text_encoder = None
         gc.collect()
         torch.mps.empty_cache()
+        stage = 'model_to_device'
         pipe.to('mps')
         torch.mps.synchronize()
         ready = True
-        print('模型已就绪。关闭此终端即可停止服务并释放模型。', flush=True)
+        print('模型已就绪。可通过菜单栏小助手停止服务。', flush=True)
     except Exception as exc:
         failure = str(exc)
-        print('模型加载失败：' + failure, flush=True)
+        diagnostic('MODEL_LOAD_FAILED', exc, stage)
+
+def diagnostic(code, exc, stage='unknown'):
+    # Classify internally; never emit raw exception text, paths, URLs or locals.
+    reason = 'UNCLASSIFIED'
+    if isinstance(exc, FileNotFoundError):
+        reason = 'FILE_NOT_FOUND'
+    elif isinstance(exc, PermissionError):
+        reason = 'PERMISSION_DENIED'
+    elif isinstance(exc, ImportError):
+        reason = 'DEPENDENCY_UNAVAILABLE'
+    elif isinstance(exc, MemoryError) or 'out of memory' in str(exc).lower():
+        reason = 'OUT_OF_MEMORY'
+    elif isinstance(exc, TimeoutError):
+        reason = 'TIMEOUT'
+    elif isinstance(exc, ConnectionError):
+        reason = 'CONNECTION_INTERRUPTED'
+    location = 'unknown'
+    trace = exc.__traceback__
+    while trace:
+        if trace.tb_frame.f_code.co_filename == __file__:
+            location = f'service.py:{trace.tb_lineno}'
+        trace = trace.tb_next
+    print(f'{code}: {type(exc).__name__} reason={reason} stage={stage} location={location}', flush=True)
 
 def dimensions(width, height):
     scale = min(1, 768 / max(width, height), (330000 / (width * height)) ** .5)
@@ -101,7 +131,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(403, {'error': '拒绝访问'})
         self.send_response(204)
         self.send_header('Access-Control-Allow-Origin', self.headers.get('Origin', ''))
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Print-Chamber-Refresh')
         self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
         self.end_headers()
 
@@ -120,7 +150,7 @@ class Handler(BaseHTTPRequestHandler):
                 index = int(path.rsplit('/', 1)[-1])
                 if not 0 <= index < len(SAMPLES):
                     raise ValueError()
-                p = Path('/Users/abelguan/Downloads') / SAMPLES[index]
+                p = settings()['samples'] / SAMPLES[index]
                 return self.respond(200, p.read_bytes(), 'image/webp' if p.suffix == '.webp' else 'image/jpeg')
             except (ValueError, OSError):
                 return self.respond(404, {'error': '样图不存在'})
@@ -134,53 +164,76 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != '/generate':
             return self.respond(404, {'error': '不存在'})
         if not ready:
-            return self.respond(503, {'error': '模型加载失败，请检查终端' if failure else '模型正在准备，请稍后重试'})
+            return self.respond(503, {'code': 'MODEL_LOAD_FAILED' if failure else 'MODEL_LOADING',
+                                      'error': '模型加载失败，请在菜单栏查看运行日志' if failure else '模型正在准备，请稍后重试'})
         if not lock.acquire(blocking=False):
-            return self.respond(409, {'error': '正在处理另一张图片，请稍后重试'})
+            return self.respond(409, {'code': 'MODEL_BUSY', 'error': '正在处理另一张图片，请稍后重试'})
+        stage = 'request_read'
         try:
             self.connection.settimeout(15)
-            length = int(self.headers.get('Content-Length', '0'))
+            try:
+                length = int(self.headers.get('Content-Length', '0'))
+            except ValueError:
+                return self.respond(400, {'code': 'INVALID_LENGTH', 'error': '图片传输长度无效'})
             if not 0 < length <= 12 * 1024 * 1024:
                 return self.respond(413, {'error': '图片文件过大'})
             raw = self.rfile.read(length)
             if len(raw) != length:
                 return self.respond(400, {'error': '图片传输不完整'})
             key = hashlib.sha256(raw).hexdigest()
-            if key in cache:
+            if key in cache and self.headers.get('X-Print-Chamber-Refresh') != '1':
                 cache.move_to_end(key)
                 return self.respond(200, {**cache[key], 'cached': True})
-            from PIL import Image, ImageOps
+            from PIL import Image, ImageOps, UnidentifiedImageError
             import torch
             Image.MAX_IMAGE_PIXELS = 24000000
             start = time.perf_counter()
-            with Image.open(io.BytesIO(raw)) as img:
-                if img.width * img.height > 24000000:
-                    return self.respond(413, {'error': '图片分辨率过大'})
-                img = ImageOps.exif_transpose(img).convert('RGB')
-                w, h = dimensions(*img.size)
-                img.thumbnail((w, h), Image.Resampling.LANCZOS)
+            stage = 'image_decode'
+            try:
+                with Image.open(io.BytesIO(raw)) as img:
+                    if img.width * img.height > 24000000:
+                        return self.respond(413, {'code': 'IMAGE_TOO_LARGE', 'error': '图片分辨率过大'})
+                    img = ImageOps.exif_transpose(img)
+                    if 'A' in img.getbands() or 'transparency' in img.info:
+                        rgba = img.convert('RGBA')
+                        img = Image.alpha_composite(Image.new('RGBA', rgba.size, 'white'), rgba).convert('RGB')
+                    else:
+                        img = img.convert('RGB')
+                    w, h = dimensions(*img.size)
+                    img.thumbnail((w, h), Image.Resampling.LANCZOS)
+            except Image.DecompressionBombError:
+                return self.respond(413, {'code': 'IMAGE_TOO_LARGE', 'error': '图片分辨率过大'})
+            except (UnidentifiedImageError, OSError, ValueError):
+                return self.respond(400, {'code': 'INVALID_IMAGE', 'error': '图片数据损坏或格式不受支持'})
+            stage = 'inference'
             with torch.inference_mode():
                 result = pipe(image=img, prompt_embeds=embeds, width=w, height=h,
                               num_inference_steps=4, guidance_scale=1.0,
                               generator=torch.Generator('cpu').manual_seed(42)).images[0]
+            stage = 'device_sync'
             torch.mps.synchronize()
+            stage = 'result_encode'
             buf = io.BytesIO()
             result.save(buf, format='JPEG', quality=90)
             data = {'image': 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode(),
-                    'seconds': round(time.perf_counter() - start, 3), 'cached': False, 'width': w, 'height': h}
+                    'seconds': round(time.perf_counter() - start, 3), 'cached': False, 'width': w, 'height': h,
+                    'promptHash': prompt_hash}
             cache[key] = data
             while len(cache) > 24:
                 cache.popitem(last=False)
             self.respond(200, data)
+        except (TimeoutError, ConnectionError) as exc:
+            diagnostic('TRANSFER_FAILED', exc, stage)
+            self.respond(408, {'code': 'TRANSFER_FAILED', 'error': '图片传输中断，请重试'})
         except Exception as exc:
-            print('生成失败：' + str(exc), flush=True)
-            self.respond(400, {'error': '无法处理这张图片，请尝试其他图片'})
+            diagnostic('INFERENCE_FAILED', exc, stage)
+            self.respond(500, {'code': 'INFERENCE_FAILED', 'error': '模型推理失败，请在菜单栏查看运行日志，必要时重启模型'})
         finally:
             lock.release()
 
 if __name__ == '__main__':
     server = ThreadingHTTPServer(('127.0.0.1', PORT), Handler)
-    print(f'本地服务：http://127.0.0.1:{PORT}/demo\n插件连接码：{TOKEN}', flush=True)
+    print(f'本地服务：http://127.0.0.1:{PORT}/demo\n连接码请通过菜单栏小助手复制。', flush=True)
     threading.Thread(target=load, daemon=True).start()
     try:
         server.serve_forever()

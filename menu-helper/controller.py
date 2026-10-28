@@ -10,12 +10,18 @@ import time
 import urllib.request
 
 ROOT = Path(__file__).resolve().parent.parent
-STATE = ROOT / '.local'
-PYTHON = Path('/Users/abelguan/Documents/Codex/LocalModels/flux2-klein/.venv/bin/python')
+sys.path.insert(0, str(ROOT))
+from runtime_config import STATE, settings
+PYTHON = settings()['python']
 PORT = 8877
 
 def command(*args):
-    return subprocess.run(args, capture_output=True, text=True, timeout=5).stdout.strip()
+    result = subprocess.run(args, capture_output=True, text=True, timeout=5)
+    # lsof uses exit 1 when no process matches, but diagnostic failures are errors.
+    no_match = args[0] == '/usr/sbin/lsof' and result.returncode == 1 and not result.stderr and not result.stdout
+    if result.returncode and not no_match:
+        raise RuntimeError(f'{Path(args[0]).name} process inspection failed (exit {result.returncode})')
+    return result.stdout.strip()
 
 def owner():
     pids = command('/usr/sbin/lsof', '-nP', '-tiTCP:8877', '-sTCP:LISTEN').splitlines()
@@ -93,4 +99,5 @@ if __name__ == '__main__':
             action = sys.argv[1] if len(sys.argv) > 1 else 'status'
             print(json.dumps({'status': status, 'start': start, 'stop': stop}[action](), ensure_ascii=False))
     except Exception as exc:
-        print(json.dumps({'state': 'error', 'label': '操作失败，请重试', 'detail': str(exc)}, ensure_ascii=False))
+        print('CONTROL_FAILED: ' + type(exc).__name__, file=sys.stderr, flush=True)
+        print(json.dumps({'state': 'error', 'code': 'CONTROL_FAILED', 'label': '操作失败，请查看运行日志'}, ensure_ascii=False))

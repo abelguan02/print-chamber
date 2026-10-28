@@ -1,7 +1,7 @@
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
 (async()=>{
- const context=await chromium.launchPersistentContext('/private/tmp/print-chamber-stale-test',{headless:true,executablePath:'/Users/abelguan/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
+ const context=await chromium.launchPersistentContext('/private/tmp/print-chamber-stale-test',{headless:true,executablePath:require('./tests/browser-options.cjs').executablePath,args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
  try{
   const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
   await worker.evaluate(()=>chrome.storage.local.set({token:'',enabled:true,trigger:'hover',disabledSites:[]}));

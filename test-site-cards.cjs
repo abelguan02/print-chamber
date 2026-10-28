@@ -2,13 +2,13 @@ const {chromium}=require('playwright');
 const fs=require('fs');
 const assert=require('node:assert/strict');
 (async()=>{
- const context=await chromium.launchPersistentContext('/private/tmp/print-chamber-card-tests',{headless:true,viewport:{width:1400,height:900},executablePath:'/Users/abelguan/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
+ const context=await chromium.launchPersistentContext('/private/tmp/print-chamber-card-tests',{headless:true,viewport:{width:1400,height:900},executablePath:require('./tests/browser-options.cjs').executablePath,args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
  try{
  const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
  await worker.evaluate(()=>chrome.storage.local.set({token:'',enabled:true}));
  const page=await context.newPage();
  const image='https://cdna.artstation.com/chamber-fixture.jpg';
- await context.route(image,r=>r.fulfill({contentType:'image/jpeg',body:fs.readFileSync('/Users/abelguan/Downloads/applegreed-web2.jpg')}));
+ await context.route(image,r=>r.fulfill({contentType:'image/png',body:fs.readFileSync(require('./tests/browser-options.cjs').fixture)}));
  await context.route('https://www.artstation.com/chamber-fixture',r=>r.fulfill({contentType:'text/html',body:`<!doctype html><style>body{display:flex;gap:80px;padding:40px}.card{width:240px;height:400px;position:relative}img{width:100%;height:100%;object-fit:cover}.overlay{position:absolute;inset:0;background:linear-gradient(transparent,#0003)}.bg{background:center/cover url(${image})}</style><div class="card"><img src="${image}"><div class="overlay"><span>Artwork overlay</span></div></div><div class="card bg"></div><div class="card"><img id="lazy"></div><script>setTimeout(()=>document.querySelector('#lazy').src='${image}',1500)</script>`}));
  await page.goto('https://www.artstation.com/chamber-fixture');
  const host=page.locator('print-chamber-overlay');

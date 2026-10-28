@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 (async () => {
   const extension = path.join(__dirname, 'extension');
   const context = await chromium.launchPersistentContext('/private/tmp/print-chamber-browser-test', {
-    headless: true, executablePath: '/Users/abelguan/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing', viewport: {width:1440,height:1000},
+    headless: true, executablePath:require('./tests/browser-options.cjs').executablePath, viewport: {width:1440,height:1000},
     args: [`--disable-extensions-except=${extension}`, `--load-extension=${extension}`]
   });
   try {

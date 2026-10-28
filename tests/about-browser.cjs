@@ -1,0 +1,48 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const {chromium}=require('playwright');
+const fs=require('node:fs/promises');
+const os=require('node:os');
+const path=require('node:path');
+const root=path.resolve(__dirname,'..');
+test('About page: manifest version, links, clipboard feedback, responsive layout and reduced motion',async()=>{
+ const profile=await fs.mkdtemp(path.join(os.tmpdir(),'chamber-about-'));
+ let context;
+ try{
+  context=await chromium.launchPersistentContext(profile,{headless:true,executablePath:require('./browser-options.cjs').executablePath,args:[`--disable-extensions-except=${root}/extension`,`--load-extension=${root}/extension`]});
+  const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
+  const base='chrome-extension://'+new URL(worker.url()).host;
+  const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(base+'/about.html');
+  await page.waitForFunction(()=>!document.querySelector('#copy-version').disabled);
+  const version=require('../extension/manifest.json').version;
+  assert.equal(await page.locator('#version').textContent(),'v'+version);
+  await page.evaluate(()=>{Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{window.copied=value}}})});
+  await page.locator('#copy-version').click();
+  assert.equal(await page.evaluate(()=>window.copied),'Print Chamber v'+version);
+  assert.equal(await page.locator('#copy-status').textContent(),'版本信息已复制');
+  await page.evaluate(()=>{navigator.clipboard.writeText=async()=>{throw new Error('denied')}});
+  await page.locator('#copy-version').click();
+  assert.match(await page.locator('#copy-status').textContent(),/复制失败/);
+  for(const width of [320,768,1024,1440]){
+   await page.setViewportSize({width,height:1000});
+   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'No overflow at '+width);
+  }
+  await page.emulateMedia({reducedMotion:'reduce'});
+  assert.equal(await page.locator('.ticker>div').evaluate(el=>getComputedStyle(el).animationName),'none');
+  await page.reload();
+  await page.waitForFunction(()=>!document.querySelector('#copy-version').disabled);
+  await page.setViewportSize({width:1024,height:1050});
+  await page.screenshot({path:path.join(root,'output/about-page.png'),fullPage:true});
+  assert.deepEqual(await page.locator('.tiles b').allTextContents(),['开源仓库','反馈与建议','自愿赞赏']);
+  assert.deepEqual(await page.locator('.tiles small').allTextContents(),['暂未开放','暂未开放','暂未开放']);
+  assert.equal(await page.locator('.tiles button:disabled').count(),3);
+  assert.equal(await page.locator('.tiles a').count(),0);
+  await page.goto(base+'/settings.html');
+  await page.locator('a[href="about.html"]').click();
+  assert.ok(page.url().endsWith('/about.html'));
+  await page.goto(base+'/popup.html');
+  assert.equal(await page.locator('a[href="about.html"]').count(),1);
+  assert.deepEqual(errors,[]);
+ }finally{await context?.close();await fs.rm(profile,{recursive:true,force:true})}
+});

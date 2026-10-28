@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>生成设置 · Print Chamber</title><link rel="stylesheet" href="settings.css"></head>
+<body><main><header><span>PRINT CHAMBER</span><h1>生成设置</h1></header>
+<form id="settings"><fieldset id="fields">
+<label for="mode">生成方式</label><select id="mode"><option value="cloud">云端 API（推荐）</option><option value="local">本地模型（进阶）</option></select>
+<p id="first-use-note" hidden>尚未保存配置</p>
+<section id="local-note">
+<p>需要另行安装模型、运行环境、本地服务和菜单栏小助手（Apple Silicon Mac）。插件不附带这些内容，暂无一键安装包。</p>
+<details><summary>首次连接指南</summary><ol><li>准备 FLUX.2 Klein 4B 模型及本地环境，打开菜单栏小助手，点击“启动模型”。</li><li>点击小助手中的“复制插件连接码”，将这台电脑的连接码粘贴到下方。</li><li>测试连接，确认已就绪后保存，即可到作品页打印。</li></ol><p>保存不会启动模型；本地服务关闭后，需要从小助手重新启动。没有本地环境可以选择云端 API。</p></details>
+<label for="local-token">本地连接码</label><input id="local-token" type="password" autocomplete="off" spellcheck="false" maxlength="1024" placeholder="粘贴菜单栏小助手中的连接码">
+<p id="local-key-state" hidden></p>
+<button id="local-check" type="button">测试连接</button>
+<p id="local-status" role="status" aria-live="polite">尚未检查连接</p>
+<p class="hint">测试连接不生成图片。</p>
+</section>
+<section id="cloud-fields" hidden>
+<p>无需安装本地模型，使用你自己的 API Key。</p>
+<label for="provider">模型供应商</label><select id="provider"></select>
+<p id="provider-notice" role="note" hidden></p>
+<label for="key">API Key</label><input id="key" type="password" autocomplete="off" spellcheck="false" maxlength="1024" placeholder="填写此供应商的 API Key">
+<p id="key-state" hidden></p>
+<div id="ali-fields" hidden><label for="region">百炼地区</label><select id="region"><option value="cn-beijing">中国大陆 · 北京</option><option value="ap-southeast-1">海外 · 新加坡</option></select><label for="workspace">工作空间 ID</label><input id="workspace" maxlength="80" autocomplete="off" placeholder="百炼控制台中的 Workspace ID"><p>工作空间、地区和 API Key 必须匹配。</p></div>
+<label for="model">模型</label><select id="model"></select>
+<p id="verification" role="status">尚未进行真实生成验证</p>
+<label class="consent"><input id="consent" type="checkbox">我了解：启用云端后，原图会上传给所选供应商，悬停打印和重试可能产生费用。</label>
+<button id="check" type="button">测试连接</button>
+<p id="cloud-check-help" class="hint"></p>
+<p id="provider-region-note" class="hint" hidden>大陆与海外密钥分别保存，请选择对应的 MiniMax 平台。</p>
+<details><summary>密钥与使用说明</summary><p>密钥仅保存在这台浏览器，不同步、不写入打印记录，也并非系统钥匙串加密存储。卸载插件会清除配置。</p><p>列表中的模型仍需账号开通权限。当前供应商的真实调用、网络、耗时及效果尚未由开发方验证；上方状态只记录此浏览器当前配置的生成结果。</p><button id="forget" type="button" class="quiet">删除此供应商密钥</button></details>
+</section>
+<button id="save-settings" type="submit">保存并使用</button>
+<p id="notice" role="status" aria-live="polite"></p>
+<section id="trial-section" class="trial" hidden><h2>效果预览</h2><label for="file">参考原画</label><input id="file" type="file" accept="image/png,image/jpeg,image/webp"><p>试生成会上传原画并消耗额度。结果仅显示在此页，不写入出纸托盘。</p><button id="trial" type="button">试生成一张（可能计费）</button><img id="preview" alt="试生成结果" hidden><a id="download" hidden download="print-chamber-trial.jpg">下载试生成结果</a></section>
+</fieldset></form>
+<p><a href="about.html" style="color:inherit">关于 Print Chamber</a></p>
+</main><script src="cloud.js"></script><script src="local-settings.js"></script><script src="settings.js"></script></body></html>

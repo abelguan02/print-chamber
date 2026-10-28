@@ -2,10 +2,10 @@ const {chromium}=require('playwright');
 const fs=require('fs');const assert=require('node:assert/strict');
 (async()=>{
  const profile=fs.mkdtempSync('/private/tmp/print-chamber-batch-');
- const context=await chromium.launchPersistentContext(profile,{headless:true,viewport:{width:1440,height:1000},executablePath:'/Users/abelguan/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
+ const context=await chromium.launchPersistentContext(profile,{headless:true,viewport:{width:1440,height:1000},executablePath:require('./tests/browser-options.cjs').executablePath,args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
  try{
  const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker'),id=new URL(worker.url()).host;
- const image='data:image/jpeg;base64,'+fs.readFileSync('output/local-20261007-111710/preview-432x768-2.jpg').toString('base64');
+ const image='data:image/png;base64,'+fs.readFileSync(require('./tests/browser-options.cjs').fixture).toString('base64');
  const records=['a','b','c'].map((id,i)=>({id,image,sourceUrl:`https://example.com/${id}.jpg`,pageUrl:'https://www.artstation.com/',title:`Print ${id}`,site:i===2?'www.behance.net':'www.artstation.com',seconds:2.5,createdAt:Date.now()}));
  await worker.evaluate(history=>chrome.storage.local.set({history}),records);
  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(`chrome-extension://${id}/gallery.html`);await page.locator('#records article').nth(2).waitFor();

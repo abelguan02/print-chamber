@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).parent
 DEST = ROOT / 'design-reference'
 DEST.mkdir(exist_ok=True)
-source = Path('/Users/abelguan/Downloads/Print Chamber 设计稿.html').read_text()
+source = (DEST / 'original.html').read_text()
 
 def section(text, name):
     match = re.search(r'<script[^>]*type="__bundler/' + name + r'"[^>]*>(.*?)</script>', text, re.S)

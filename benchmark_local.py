@@ -13,13 +13,7 @@ from PIL import Image
 from diffusers import Flux2KleinPipeline
 
 ROOT = Path(__file__).resolve().parent
-PROMPT = """Re-render this exact illustration in 3D, keeping the picture itself unchanged. 
-The same character keeps the same face, expression, pose, framing, hair, outfit and accessories, 
-with every color, skin tone and brightness matching the original. 
-The background and lighting stay exactly as in the original image. 
-Only the surface rendering changes: sculpted hair strands, soft volumetric skin, 
-real cloth folds, distinct fabric and metal, gentle contact shadows, 
-like a high-quality 3D game cinematic."""
+PROMPT = """Re-render this exact image in 3D, keeping the original picture unchanged. Preserve all original content, shapes, proportions, positions, composition, perspective and framing. Match the original colors, brightness, lighting and atmosphere. Only change the rendering quality: give the existing forms solid three-dimensional volume, convincing material textures, surface depth and subtle contact shadows. Do not add, remove, redesign, rearrange or crop anything."""
 
 def sync():
     torch.mps.synchronize()

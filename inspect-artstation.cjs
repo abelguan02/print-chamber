@@ -1,6 +1,6 @@
 const {chromium}=require('playwright');
 (async()=>{
- const context=await chromium.launchPersistentContext('/private/tmp/print-chamber-artstation-test',{headless:true,executablePath:'/Users/abelguan/Library/Caches/ms-playwright/chromium-1243/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing',args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
+ const context=await chromium.launchPersistentContext('/private/tmp/print-chamber-artstation-test',{headless:true,executablePath:require('./tests/browser-options.cjs').executablePath,args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
  try {
  const page=await context.newPage();
  await page.goto('https://www.artstation.com/',{waitUntil:'domcontentloaded',timeout:30000});

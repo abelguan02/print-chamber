@@ -7,6 +7,7 @@ final class Helper: NSObject, NSApplicationDelegate {
     var stopItem: NSMenuItem!
     var timer: Timer?
     var pending = false
+    var controllerFailed = false
     let root = URL(fileURLWithPath: Bundle.main.object(forInfoDictionaryKey: "ProjectRoot") as! String)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -57,18 +58,30 @@ final class Helper: NSObject, NSApplicationDelegate {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
             process.arguments = [project.appendingPathComponent("menu-helper/controller.py").path, action]
             process.standardOutput = pipe
-            process.standardError = FileHandle.nullDevice
+            let logURL = project.appendingPathComponent(".local/helper.log")
+            try? FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                     attributes: [.posixPermissions: 0o700])
+            if !FileManager.default.fileExists(atPath: logURL.path) {
+                FileManager.default.createFile(atPath: logURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
+            }
+            let errorLog = try? FileHandle(forWritingTo: logURL)
+            errorLog?.seekToEndOfFile()
+            process.standardError = errorLog ?? FileHandle.nullDevice
             var result: [String: Any] = ["state": "error", "label": "无法管理模型，请查看日志"]
             do {
                 try process.run()
                 let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
                 if let parsed = try JSONSerialization.jsonObject(with: data) as? [String: Any] { result = parsed }
-            } catch {}
+            } catch {
+                errorLog?.write(Data("CONTROL_LAUNCH_FAILED\n".utf8))
+            }
+            try? errorLog?.close()
             let response = result
             DispatchQueue.main.async {
                 self.pending = false
                 let state = response["state"] as? String ?? "error"
+                self.controllerFailed = state == "error"
                 self.stateItem.title = response["label"] as? String ?? "状态未知"
                 self.startItem.isEnabled = state == "stopped"
                 self.stopItem.isEnabled = ["ready", "loading", "failed", "unreachable"].contains(state)
@@ -102,7 +115,7 @@ final class Helper: NSObject, NSApplicationDelegate {
     }
     @objc func openHelp() { NSWorkspace.shared.open(root.appendingPathComponent("菜单栏小助手说明.txt")) }
     @objc func openLog() {
-        let path = root.appendingPathComponent(".local/service.log")
+        let path = root.appendingPathComponent(controllerFailed ? ".local/helper.log" : ".local/service.log")
         if FileManager.default.fileExists(atPath: path.path) { NSWorkspace.shared.open(path) }
         else { alert("暂无运行日志，请先启动模型。") }
     }

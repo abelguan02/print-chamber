@@ -1,10 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Print Chamber · 原画立体预览",
-  "version": "0.2.4",
-  "description": "悬停原画，在本机生成 3D 风格预览。",
+  "version": "0.3.0",
+  "description": "悬停原画，使用本地模型或自选云端 API 生成 3D 风格预览。",
+  "options_ui": {"page":"settings.html","open_in_tab":true},
   "permissions": ["storage", "scripting", "clipboardWrite"],
-  "host_permissions": ["https://*/*", "http://127.0.0.1:8877/*"],
+  "host_permissions": ["https://*.artstation.com/*", "https://*.artstationcdn.com/*", "https://*.behance.net/*", "https://*.pinterest.com/*", "https://*.pinimg.com/*", "http://127.0.0.1:8877/*", "https://ark.cn-beijing.volces.com/*", "https://generativelanguage.googleapis.com/*", "https://*.aliyuncs.com/*", "https://*.bfl.ai/*", "https://bfldeliveryprod.blob.core.windows.net/*", "https://api.minimax.cn/*", "https://api.minimax.io/*"],
   "background": {"service_worker": "background.js"},
   "action": {"default_popup": "popup.html", "default_title": "Print Chamber"},
   "content_scripts": [{

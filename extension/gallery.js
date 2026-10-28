@@ -42,7 +42,7 @@ function render(){
  const visibleIds=new Set(visibleRecords().map(r=>r.id));for(const id of selected)if(!visibleIds.has(id))selected.delete(id);
  $('#total').textContent=records.length+' PRINTS';$('#average').textContent='AVG '+(records.length?(records.reduce((s,r)=>s+Number(r.seconds||0),0)/records.length).toFixed(1)+'S':'—');
  const latest=records[0];hero.className='panel '+(latest?'ready':'');hero.querySelector('.lcd').textContent=latest?'DONE':'READY';
- hero.querySelector('.caption').textContent=latest?'本地打印 · '+Number(latest.seconds||0).toFixed(1)+' 秒 · '+siteName(latest.site):'把鼠标停在原画上开始打印';
+ hero.querySelector('.caption').textContent=latest?(latest.provider&&latest.provider!=='local'?'云端打印':'本地打印')+' · '+Number(latest.seconds||0).toFixed(1)+' 秒 · '+siteName(latest.site):'把鼠标停在原画上开始打印';
  if(latest)hero.querySelector('.result').src=latest.image;
  for(const b of hero.querySelectorAll('.keys button'))b.disabled=!latest;
  hero.querySelector('.pin').onclick=()=>latest&&detail(latest);
@@ -72,9 +72,9 @@ function render(){
 }
 function siteName(host){return /artstation\.com$/.test(host)?'ArtStation':/behance\.net$/.test(host)?'Behance':/pinterest\.com$/.test(host)?'Pinterest':host==='127.0.0.1'?'本地画廊':host}
 document.querySelectorAll('[data-filter]').forEach(b=>b.onclick=()=>{filter=b.dataset.filter;selected.clear();batchNotice.textContent='';document.querySelectorAll('[data-filter]').forEach(n=>n.setAttribute('aria-pressed',String(n===b)));render()});
-chrome.storage.local.get(['history','token']).then(async v=>{
+chrome.storage.local.get(['history','token','generationMode','cloudVerified']).then(async v=>{
  records=v.history||[];render();const id=decodeURIComponent(location.hash.slice(1));const record=records.find(r=>r.id===id);if(record)detail(record);
- let label='OFFLINE',color='#FF5A48';try{const r=await fetch('http://127.0.0.1:8877/health',{headers:v.token?{Authorization:'Bearer '+v.token}:{},signal:AbortSignal.timeout(2000)});const h=await r.json();if(r.ok&&v.token&&!h.failed){label=h.ready?(h.busy?'PRINTING':'READY'):'LOADING';color=h.ready&&!h.busy?'#7BE07B':'#F4B53A'}}catch{}
+ let label='OFFLINE',color='#FF5A48';if(v.generationMode==='cloud'){label=v.cloudVerified?'CLOUD':'UNVERIFIED';color=v.cloudVerified?'#7BE07B':'#F4B53A'}else{try{const r=await fetch('http://127.0.0.1:8877/health',{headers:v.token?{Authorization:'Bearer '+v.token}:{},signal:AbortSignal.timeout(2000)});const h=await r.json();if(r.ok&&v.token&&!h.failed){label=h.ready?(h.busy?'PRINTING':'READY'):'LOADING';color=h.ready&&!h.busy?'#7BE07B':'#F4B53A'}}catch{}}
  $('#health').lastElementChild.textContent=label;$('#health').lastElementChild.style.color=color;$('#health').firstElementChild.style.background=color;$('#health').firstElementChild.style.boxShadow='0 0 8px 2px '+color+'88';
 });
 chrome.storage.onChanged.addListener(c=>{if(c.history){records=c.history.newValue||[];if($('#detail').open)$('#detail').close();render()}});

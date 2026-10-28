@@ -1,5 +1,7 @@
 # Confirmed project baseline
 
+Latest authorized prompt change (2026-10-26): the user explicitly authorized replacing active D with G3 and connecting it to the current generation paths. `benchmark_local.py` and `extension/cloud-prompt.js` now use the exact text from `output/scenes-g3-20261025-060950/prompt.txt`. This supersedes the D-default instructions below. G4 remains rejected; the old archive remains immutable. Autumn forest color drift remains a known limitation; no further prompt iteration is authorized.
+
 The user confirmed this chat's Print Chamber 0.1.1 implementation as the future direction on 2026-10-07.
 Read BASELINE.txt and baselines/print-chamber-0.1.1-20261007/manifest.json before changing implementation files.
 

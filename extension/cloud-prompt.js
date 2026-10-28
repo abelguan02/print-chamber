@@ -1,0 +1,2 @@
+// Exact G3 prompt adopted on 2026-10-26; regression-tested against benchmark_local.py.
+globalThis.CLOUD_PROMPT = "Re-render this exact image in 3D, keeping the original picture unchanged. Preserve all original content, shapes, proportions, positions, composition, perspective and framing. Match the original colors, brightness, lighting and atmosphere. Only change the rendering quality: give the existing forms solid three-dimensional volume, convincing material textures, surface depth and subtle contact shadows. Do not add, remove, redesign, rearrange or crop anything.";

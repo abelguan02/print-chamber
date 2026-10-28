@@ -30,11 +30,20 @@
   chrome.storage.onChanged.addListener(changes => {
     if (changes.enabled || changes.disabledSites || changes.trigger) preferences();
     if(changes.history){
-      const urls=new Set((changes.history.newValue||[]).map(r=>r.sourceUrl));
+      const records=new Map((changes.history.newValue||[]).map(r=>[r.sourceUrl,r]));
+      const urls=new Set(records.keys());
       const removed=new Set((changes.history.oldValue||[]).filter(r=>!urls.has(r.sourceUrl)).map(r=>r.sourceUrl));
-      for(let i=pinnedPrints.length-1;i>=0;i--)if(removed.has(pinnedPrints[i].url))pinnedPrints.splice(i,1);
+      let trayChanged=false;
+      for(let i=pinnedPrints.length-1;i>=0;i--){
+        const pinned=pinnedPrints[i],record=records.get(pinned.url);
+        if(removed.has(pinned.url)){pinnedPrints.splice(i,1);trayChanged=true}
+        else if(record && (pinned.recordId!==record.id || pinned.image!==record.image)){
+          pinnedPrints[i]={...pinned,image:record.image,seconds:record.seconds,recordId:record.id};trayChanged=true;
+        }
+      }
       for(let i=badges.length-1;i>=0;i--)if(removed.has(badges[i].url)){badges[i].badge.remove();badges.splice(i,1)}
-      if(removed.size){if(removed.has(source?.url))close();trayRoot.querySelector('.lightbox')?.remove();renderTray()}
+      if(removed.has(source?.url))close();
+      if(removed.size||trayChanged){trayRoot.querySelector('.lightbox')?.remove();renderTray()}
     }
   });
   function close() {
@@ -86,7 +95,7 @@
     panel.style.setProperty('--fly-x',((rect.left+rect.width/2-bounds.left)/scale-167)+'px');
     panel.style.setProperty('--fly-y',((rect.top+rect.height/2-bounds.top)/scale-70)+'px');
     const ticket = ++version, started = performance.now();
-    setTimeout(()=>{if(ticket===version && !currentResult && !panel.classList.contains('error'))state('printing','图片等待生成 · 本地打印中')},700);
+    setTimeout(()=>{if(ticket===version && !currentResult && !panel.classList.contains('error'))state('printing','图片等待生成 · 打印中')},700);
     let data;
     try {
       if (!(img.element instanceof HTMLImageElement)) throw new Error('Read background image through extension');
@@ -94,7 +103,8 @@
       const factor = Math.min(1, 768 / Math.max(img.width, img.height));
       canvas.width = Math.round(img.width * factor); canvas.height = Math.round(img.height * factor);
       canvas.getContext('2d').drawImage(img.element, 0, 0, canvas.width, canvas.height);
-      data = canvas.toDataURL('image/jpeg', .94);
+      // Preserve alpha until the service applies the same white matte as URL downloads.
+      data = canvas.toDataURL('image/png');
     } catch { /* Cross-origin images are fetched by the extension background. */ }
     try {
       const result = await chrome.runtime.sendMessage({type: 'generate', url: img.url, data, retry});
@@ -110,7 +120,7 @@
       progress();
       setTimeout(() => {
         if (ticket !== version) return;
-        state('ready',`${result.cached?'已打印':'本地打印'} · ${Number(result.seconds||((performance.now()-started)/1000)).toFixed(1)} 秒${result.historyError?' · 记录保存失败':''}`);
+        state('ready',`${result.cached?'已打印':result.provider?'云端打印':'本地打印'} · ${Number(result.seconds||((performance.now()-started)/1000)).toFixed(1)} 秒${result.historyError?' · 记录保存失败':''}`);
         panel.dataset.totalMs = String(Math.round(performance.now() - enteredAt));
         markPrinted(img.element);
       }, matchMedia('(prefers-reduced-motion:reduce)').matches ? 0 : 660);
@@ -194,7 +204,10 @@
   root.addEventListener('focusin', () => { inside = true; cancelCandidate();clearTimeout(hideTimer); });
   root.addEventListener('focusout', () => { queueMicrotask(()=>{inside=pointerInside||Boolean(root.activeElement);if(!inside)later()}); });
   $('.close').onclick = close;
-  $('.pin').onclick = () => {if(currentResult){pinnedPrints.unshift({...currentResult,url:source.url});if(pinnedPrints.length>12)pinnedPrints.pop();renderTray();close();}};
+  $('.pin').onclick = () => {if(currentResult){
+    for(let i=pinnedPrints.length-1;i>=0;i--)if(pinnedPrints[i].url===source.url)pinnedPrints.splice(i,1);
+    pinnedPrints.unshift({...currentResult,url:source.url});if(pinnedPrints.length>12)pinnedPrints.pop();renderTray();close();
+  }};
   $('.retry').onclick = () => { if (source) run(source,performance.now(),true); };
   $('.download').onclick = () => {if(currentResult){const a=document.createElement('a');a.href=currentResult.image;a.download='print-chamber.jpg';root.append(a);a.click();a.remove()}};
   $('.copy').onclick=async()=>{

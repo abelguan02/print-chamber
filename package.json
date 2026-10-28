@@ -1,0 +1,14 @@
+{
+  "name": "print-chamber",
+  "private": true,
+  "version": "0.3.0",
+  "engines": {"node": ">=22"},
+  "scripts": {
+    "test": "node --test tests/*.test.cjs",
+    "test:browser": "node test-site-cards.cjs && node test-stale-overlay.cjs && node test-design.cjs && node test-design.cjs --hover-only && node test-design.cjs --deletion-only && node test-batch.cjs && node --test tests/content-browser.cjs tests/gallery-browser.cjs",
+    "test:live": "node test-browser.cjs",
+    "test:cloud": "node --test tests/cloud-browser.cjs",
+    "build:design": "node build-design.cjs"
+  },
+  "devDependencies": {"playwright": "1.62.1"}
+}
