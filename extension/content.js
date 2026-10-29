@@ -205,7 +205,7 @@
       if(!enabled || inside || !same(candidate,img) || (trigger==='alt'&&!altHeld))return;
       if(!keyboard && (!point || !same(findAt(point.x,point.y),img))){cancelCandidate();return}
       cancelCandidate();run(img,enteredAt);
-    },trigger==='alt'?80:600);
+    },trigger==='alt'?80:1200);
   }
   let point, scheduled = false;
   function track(event) {
