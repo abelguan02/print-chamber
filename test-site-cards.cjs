@@ -2,7 +2,8 @@ const {chromium}=require('playwright');
 const fs=require('fs');
 const assert=require('node:assert/strict');
 (async()=>{
- const context=await chromium.launchPersistentContext('/private/tmp/print-chamber-card-tests',{headless:true,viewport:{width:1400,height:900},executablePath:require('./tests/browser-options.cjs').executablePath,args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
+ const profile=fs.mkdtempSync('/private/tmp/print-chamber-card-tests-');
+ const context=await chromium.launchPersistentContext(profile,{headless:true,viewport:{width:1400,height:900},executablePath:require('./tests/browser-options.cjs').executablePath,args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
  try{
  const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
  await worker.evaluate(()=>chrome.storage.local.set({token:'',enabled:true}));
@@ -16,12 +17,12 @@ const assert=require('node:assert/strict');
    await page.locator(selector).hover();
    await host.waitFor({state:'visible',timeout:5000});
    await host.locator('.panel.error').waitFor({timeout:5000});
-   assert((await host.locator('[role=status]').innerText()).includes('连接码'));
+   assert.match(await host.locator('[role=status]').innerText(), /连接码/);
    await page.mouse.move(1380,850); await page.waitForTimeout(850);
    assert(!(await host.isVisible()),`hide after ${selector}`);
  }
  await worker.evaluate(async()=>{const tabs=await chrome.tabs.query({url:'https://www.artstation.com/*'}); await chrome.scripting.executeScript({target:{tabId:tabs[0].id},files:['chamber-markup.js','chamber-style.js','content.js']});});
  assert.equal(await page.locator('print-chamber-overlay').count(),1,'Re-inject without duplicate UI');
  console.log(JSON.stringify({passed:true,tests:['overlay sibling','CSS background','lazy image','delayed hide','reinjection'],environment:'mocked ArtStation URL and fixture; not live site'}));
- }finally{await context.close()}
+ }finally{await context.close();fs.rmSync(profile,{recursive:true,force:true})}
 })().catch(e=>{console.error(e);process.exitCode=1});

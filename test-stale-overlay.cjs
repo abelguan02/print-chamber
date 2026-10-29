@@ -1,7 +1,9 @@
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
+const fs=require('node:fs');
 (async()=>{
- const context=await chromium.launchPersistentContext('/private/tmp/print-chamber-stale-test',{headless:true,executablePath:require('./tests/browser-options.cjs').executablePath,args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
+ const profile=fs.mkdtempSync('/private/tmp/print-chamber-stale-test-');
+ const context=await chromium.launchPersistentContext(profile,{headless:true,executablePath:require('./tests/browser-options.cjs').executablePath,args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
  try{
   const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
   await worker.evaluate(()=>chrome.storage.local.set({token:'',enabled:true,trigger:'hover',disabledSites:[]}));
@@ -15,5 +17,5 @@ const assert=require('node:assert/strict');
   assert.equal(await page.locator('print-chamber-overlay').count(),1);
   assert.equal(await page.locator('print-chamber-tray').count(),1);
   console.log('PASS: stale overlay recovery and duplicate injection protection');
- }finally{await context.close()}
+ }finally{await context.close();fs.rmSync(profile,{recursive:true,force:true})}
 })().catch(e=>{console.error(e);process.exitCode=1});
