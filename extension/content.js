@@ -82,52 +82,77 @@
     if(color && Number(color[3]??1)>0 && color.slice(0,3).reduce((a,n)=>a+Number(n),0)<350)panel.classList.add('dark');
     $('.lcd').textContent={feeding:'LOADING',printing:'PRINTING',revealing:'PRINT',ready:'DONE',error:'ERROR'}[name]||'READY';
     $('.caption').textContent=caption;
+    $('.caption').removeAttribute('title');
+    $('.retry').textContent=name==='waiting'?'打印':'重打';
     for(const button of root.querySelectorAll('.keys button'))button.disabled=name!=='ready';
-    if(name==='error')$('.retry').disabled=false;
+    if(name==='error'||name==='waiting')$('.retry').disabled=false;
   }
-  async function run(img, enteredAt = performance.now(), retry=false) {
+  async function run(img, enteredAt = performance.now(), retry=false, confirmed=false) {
+    const previousResult=source?.url===img.url?currentResult:null;
     clearTimeout(hideTimer); source = img; host.style.display = 'block';
     currentResult=null;$('.result').removeAttribute('src');
-    state('feeding','正在读取原画…');highlight(img.element);host.classList.add('appearing');
-    $('.ghost img').src=img.url;
+    state('checking','正在查找打印记录…');highlight(img.element);host.classList.add('appearing');
     place();
     const rect=img.element.getBoundingClientRect(),bounds=host.getBoundingClientRect();
     panel.style.setProperty('--fly-x',((rect.left+rect.width/2-bounds.left)/scale-167)+'px');
     panel.style.setProperty('--fly-y',((rect.top+rect.height/2-bounds.top)/scale-70)+'px');
     const ticket = ++version, started = performance.now();
-    setTimeout(()=>{if(ticket===version && !currentResult && !panel.classList.contains('error'))state('printing','图片等待生成 · 打印中')},700);
-    let data;
+    let printingTimer;
     try {
-      if (!(img.element instanceof HTMLImageElement)) throw new Error('Read background image through extension');
-      const canvas = document.createElement('canvas');
-      const factor = Math.min(1, 768 / Math.max(img.width, img.height));
-      canvas.width = Math.round(img.width * factor); canvas.height = Math.round(img.height * factor);
-      canvas.getContext('2d').drawImage(img.element, 0, 0, canvas.width, canvas.height);
-      // Preserve alpha until the service applies the same white matte as URL downloads.
-      data = canvas.toDataURL('image/png');
-    } catch { /* Cross-origin images are fetched by the extension background. */ }
-    try {
-      const result = await chrome.runtime.sendMessage({type: 'generate', url: img.url, data, retry});
+      let result = retry ? null : await chrome.runtime.sendMessage({type:'preview',url:img.url});
+      if (ticket !== version) return;
+      if (!retry && (!result || result.error)) throw new Error(result?.error || '连接已中断，请重试');
+      if (result?.confirmationRequired && !confirmed) {
+        state('waiting','点击「打印」后上传原画，云端生成可能计费');return;
+      }
+      if (retry || result.needsGeneration) {
+        state('feeding','正在读取原画…');$('.ghost img').src=img.url;
+        printingTimer=setTimeout(()=>{if(ticket===version)state('printing','图片等待生成 · 打印中')},700);
+        let data;
+        try {
+          if (!(img.element instanceof HTMLImageElement)) throw new Error('Read background image through extension');
+          const canvas = document.createElement('canvas');
+          const factor = Math.min(1, 768 / Math.max(img.width, img.height));
+          canvas.width = Math.round(img.width * factor); canvas.height = Math.round(img.height * factor);
+          canvas.getContext('2d').drawImage(img.element, 0, 0, canvas.width, canvas.height);
+          // Preserve alpha until the service applies the same white matte as URL downloads.
+          data = canvas.toDataURL('image/png');
+        } catch { /* Cross-origin images are fetched by the extension background. */ }
+        result = await chrome.runtime.sendMessage({type:'generate',url:img.url,data,retry,confirmed});
+      }
+      clearTimeout(printingTimer);
       if (ticket !== version) return;
       if (!result || result.error) throw new Error(result?.error || '连接已中断，请重试');
+      // The mode may have changed since lookup. The background still guards uploads.
+      if (result.confirmationRequired) {
+        state('waiting','点击「打印」后上传原画，云端生成可能计费');return;
+      }
       $('.result').src = result.image;
       await $('.result').decode();
       if (ticket !== version) return;
       currentResult=result;
+      const finish=()=>{
+        if (ticket !== version) return;
+        const cloud=result.provider && result.provider!=='local';
+        state('ready',result.fromHistory?`历史打印 · ${cloud?'云端':'本地'}结果`:
+          `${result.cached?'已打印':cloud?'云端打印':'本地打印'} · ${Number(result.seconds||((performance.now()-started)/1000)).toFixed(1)} 秒${result.historyError?' · 记录保存失败':''}`);
+        if(result.fromHistory)$('.caption').title=[result.provider||'local',result.model].filter(Boolean).join(' · ');
+        panel.dataset.totalMs = String(Math.round(performance.now() - enteredAt));
+        markPrinted(img.element);
+      };
+      if(result.fromHistory){finish();return;}
       state('revealing','逐层打印中…');
       const revealStart=performance.now();
       function progress(){if(ticket!==version||!panel.classList.contains('revealing'))return;$('.lcd').textContent='PRINT '+Math.min(100,Math.round((performance.now()-revealStart)/6.5))+'%';requestAnimationFrame(progress)}
       progress();
-      setTimeout(() => {
-        if (ticket !== version) return;
-        state('ready',`${result.cached?'已打印':result.provider?'云端打印':'本地打印'} · ${Number(result.seconds||((performance.now()-started)/1000)).toFixed(1)} 秒${result.historyError?' · 记录保存失败':''}`);
-        panel.dataset.totalMs = String(Math.round(performance.now() - enteredAt));
-        markPrinted(img.element);
-      }, matchMedia('(prefers-reduced-motion:reduce)').matches ? 0 : 660);
+      setTimeout(finish, matchMedia('(prefers-reduced-motion:reduce)').matches ? 0 : 660);
     } catch (error) {
       if (ticket !== version) return;
-      state('error',error.message+' · 按「重打」重试');
-    }
+      if(previousResult){
+        currentResult=previousResult;$('.result').src=previousResult.image;
+        state('ready','重打失败 · '+error.message);
+      }else state('error',error.message+' · 按「重打」重试');
+    } finally {clearTimeout(printingTimer);}
   }
   const same = (a, b) => a && b && a.element === b.element && a.url === b.url;
   function describe(element) {
@@ -208,7 +233,7 @@
     for(let i=pinnedPrints.length-1;i>=0;i--)if(pinnedPrints[i].url===source.url)pinnedPrints.splice(i,1);
     pinnedPrints.unshift({...currentResult,url:source.url});if(pinnedPrints.length>12)pinnedPrints.pop();renderTray();close();
   }};
-  $('.retry').onclick = () => { if (source) run(source,performance.now(),true); };
+  $('.retry').onclick = event => { if (source && event.isTrusted) run(source,performance.now(),!panel.classList.contains('waiting'),true); };
   $('.download').onclick = () => {if(currentResult){const a=document.createElement('a');a.href=currentResult.image;a.download='print-chamber.jpg';root.append(a);a.click();a.remove()}};
   $('.copy').onclick=async()=>{
     if(!currentResult)return;

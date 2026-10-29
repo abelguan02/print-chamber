@@ -16,13 +16,14 @@ function deferred() {
   const promise = new Promise(r => { resolve = r; });
   return {promise, resolve};
 }
-function harness({history = [], generate, download, localResponse} = {}) {
-  const storage = {token: 'test-token', enabled: true, disabledSites: [], history};
+function harness({history = [], generate, download, localResponse, generationMode = 'local'} = {}) {
+  const storage = {token: 'test-token', enabled: true, disabledSites: [], history, generationMode};
   const requests = [];
+  const cloudRequests = [];
   const downloads = [];
   let listener;
   const chrome = {
-    runtime: {id: 'test-extension', onInstalled: {addListener() {}}, onMessage: {addListener(fn) {listener = fn;}}},
+    runtime: {id: 'test-extension', getPlatformInfo: async()=>({}), onInstalled: {addListener() {}}, onMessage: {addListener(fn) {listener = fn;}}},
     storage: {local: {
       async get(keys) {
         const selected = typeof keys === 'string' ? [keys] : keys;
@@ -48,11 +49,16 @@ function harness({history = [], generate, download, localResponse} = {}) {
     };
     return {ok: true, json: async () => structuredClone({promptHash, ...payload})};
   }
-  vm.runInNewContext(source, {importScripts(){}, CLOUD_PROMPT: promptContext.CLOUD_PROMPT, chrome, fetch, URL, Blob, AbortSignal, TextEncoder, crypto: {randomUUID, subtle: webcrypto.subtle}, console});
+  const CloudConfig = {active: async()=>({provider:'test-cloud',model:'test-model'}), verified:async()=>{}};
+  const Cloud = {generate: async(config, blob)=>{
+    cloudRequests.push({config,blob});
+    return {image:image(await blob.text()),seconds:1,provider:config.provider,model:config.model};
+  }};
+  vm.runInNewContext(source, {importScripts(){}, CLOUD_PROMPT: promptContext.CLOUD_PROMPT, Cloud, CloudConfig, chrome, fetch, URL, Blob, AbortSignal, TextEncoder, setInterval, clearInterval, crypto: {randomUUID, subtle: webcrypto.subtle}, console});
   const sender = {id: chrome.runtime.id, tab: {url: 'https://www.artstation.com/artwork/test', title: 'Test artwork'}};
   return {
-    storage, requests, downloads,
-    send(message) {return new Promise(resolve => listener(message, sender, resolve));},
+    storage, requests, downloads, cloudRequests,
+    send(message) {return new Promise(resolve => {if (!listener(message, sender, resolve)) resolve();});},
     print(bytes = 'first', extra = {}) {
       return this.send({type: 'generate', url: pictureURL, data: image(bytes), ...extra});
     }
@@ -63,20 +69,25 @@ for (const oldHash of [undefined, 'old-D-prompt']) {
   test(`old service result (${oldHash}) is not displayed or saved as the current prompt`, async () => {
     const previous = {id:'old', sourceUrl:pictureURL, image:image('old print')};
     const app = harness({history:[previous], generate:async()=>({image:image('old D'), cached:true, promptHash:oldHash})});
-    const result = await app.print();
+    const result = await app.print('replacement', {retry:true});
     assert.match(result.error, /重启本地模型/);
     assert.equal(result.image, undefined);
     assert.deepEqual(app.storage.history, [previous]);
   });
 }
 
-test('the same URL with changed image bytes generates the changed image', async () => {
+test('ordinary viewing reuses the saved print; explicit retry reads changed image bytes', async () => {
   const app = harness();
   const first = await app.print('first image');
   const second = await app.print('replacement image');
   assert.equal(first.error, undefined);
   assert.equal(second.error, undefined);
-  assert.equal(second.image, image('replacement image'));
+  assert.equal(second.image, first.image);
+  assert.equal(second.fromHistory, true);
+  assert.equal(second.recordId, first.recordId);
+  assert.equal(app.requests.length, 1);
+  const replacement = await app.print('replacement image', {retry:true});
+  assert.equal(replacement.image, image('replacement image'));
   assert.equal(app.requests.length, 2);
 });
 
@@ -89,7 +100,7 @@ for (const mode of ['single', 'batch']) {
       if (count === 1) {started.resolve(); await complete.promise;}
       return {image: image('rendered'), seconds: 1, cached: false};
     }});
-    const inFlight = app.print('updated');
+    const inFlight = app.print('updated', {retry:true});
     await started.promise;
     const deleted = await app.send(mode === 'single'
       ? {type: 'delete-history', sourceUrl: pictureURL}
@@ -108,6 +119,101 @@ test('retry propagates an explicit refresh request to the local service', async 
   const app = harness();
   assert.equal((await app.print('image', {retry: true})).error, undefined);
   assert.equal(new Headers(app.requests[0].headers).get('X-Print-Chamber-Refresh'), '1');
+});
+
+for (const generationMode of ['local', 'cloud']) {
+  test(`${generationMode} history works without credentials, source download or history rewrite`, async () => {
+    const previous = {id:'saved', sourceUrl:pictureURL, image:image('saved result'), createdAt:123, seconds:2};
+    const app = harness({generationMode, history:[previous]});
+    delete app.storage.token;
+    const result = await app.send({type:'generate', url:pictureURL});
+    assert.equal(result.image, previous.image);
+    assert.equal(result.recordId, previous.id);
+    assert.equal(result.fromHistory, true);
+    assert.equal(result.cached, true);
+    assert.deepEqual(app.storage.history, [previous]);
+    assert.equal(app.requests.length + app.downloads.length + app.cloudRequests.length, 0);
+  });
+}
+
+test('saved results survive a background restart and retain generation metadata', async () => {
+  const app = harness({generate:async()=>({image:image('result'), seconds:2, seed:73, width:512, height:768})});
+  await app.print();
+  const restarted = harness({history:app.storage.history});
+  delete restarted.storage.token;
+  const result = await restarted.send({type:'preview',url:pictureURL});
+  assert.equal(result.image, image('result'));
+  assert.equal(result.seed, 73);
+  assert.equal(result.promptHash, promptHash);
+  assert.equal(result.width, 512);
+  assert.equal(result.height, 768);
+  assert.equal(restarted.requests.length, 0);
+});
+
+test('history can be viewed while another picture is being generated', async () => {
+  const started=deferred(), complete=deferred();
+  const previous={id:'saved',sourceUrl:pictureURL,image:image('saved')};
+  const app=harness({history:[previous],generate:async()=>{
+    started.resolve();await complete.promise;return {image:image('new')};
+  }});
+  const printing=app.print('new',{url:'https://cdna.artstation.com/another.jpg'});
+  await started.promise;
+  try {
+    assert.equal((await app.print()).image, previous.image);
+    assert.equal(app.requests.length, 1);
+  } finally {complete.resolve();await printing;}
+});
+
+test('preview lookup never submits a new generation', async () => {
+  const app=harness();
+  const preview=await app.send({type:'preview',url:pictureURL});
+  assert.equal(preview.needsGeneration, true);
+  assert.equal(preview.confirmationRequired, false);
+  assert.equal(app.requests.length + app.downloads.length, 0);
+});
+
+test('cloud preview and unconfirmed generation or retry never upload an image', async () => {
+  const app=harness({generationMode:'cloud'});
+  for (const message of [
+    {type:'preview',url:pictureURL},
+    {type:'generate',url:pictureURL},
+    {type:'generate',url:pictureURL,retry:true},
+    {type:'generate',url:pictureURL,confirmed:'true'}
+  ]) {
+    assert.equal((await app.send(message)).confirmationRequired, true);
+  }
+  assert.equal(app.requests.length + app.downloads.length + app.cloudRequests.length, 0);
+  assert.equal(app.storage.history.length, 0);
+});
+
+test('cloud confirmation prints once, saved views are free and reprints need confirmation', async () => {
+  const app=harness({generationMode:'cloud'});
+  const first=await app.print('cloud image',{confirmed:true});
+  assert.equal(first.error, undefined);
+  assert.equal(app.cloudRequests.length, 1);
+  assert.equal(app.storage.history[0].promptHash, promptHash);
+  assert.equal(app.storage.history[0].model, 'test-model');
+  assert.equal((await app.print()).image, first.image);
+  assert.equal((await app.print('new',{retry:true})).confirmationRequired, true);
+  assert.equal(app.cloudRequests.length, 1);
+  assert.equal((await app.print('new',{retry:true,confirmed:true})).image, image('new'));
+  assert.equal(app.cloudRequests.length, 2);
+});
+
+test('failed reprinting keeps the previous saved image', async () => {
+  const previous={id:'saved',sourceUrl:pictureURL,image:image('saved')};
+  const app=harness({history:[previous],localResponse:()=>({ok:false,json:async()=>({error:'生成失败'})})});
+  assert.match((await app.print('new',{retry:true})).error,/生成失败/);
+  assert.deepEqual(app.storage.history,[previous]);
+  assert.equal((await app.print()).image,previous.image);
+});
+
+test('paused previews cannot replay history', async () => {
+  const app=harness({history:[{id:'saved',sourceUrl:pictureURL,image:image('saved')}]});
+  app.storage.enabled=false;
+  assert.match((await app.print()).error,/暂停/);
+  app.storage.enabled=true;app.storage.disabledSites=['www.artstation.com'];
+  assert.match((await app.print()).error,/暂停/);
 });
 
 for (const url of [
@@ -130,7 +236,7 @@ for (const url of [
   });
 }
 
-test('approved CDN downloads disallow redirects and revalidate repeated URL content', async () => {
+test('approved CDN downloads disallow redirects and explicit reprints revalidate URL content', async () => {
   const png = fs.readFileSync(path.join(__dirname, 'fixtures/artwork.png'));
   let current = png;
   const app = harness({download: async () => new Response(current, {
@@ -139,7 +245,10 @@ test('approved CDN downloads disallow redirects and revalidate repeated URL cont
   const first = await app.send({type: 'generate', url: pictureURL});
   assert.equal(first.image, image(current.toString()));
   current = Buffer.concat([png, Buffer.from('updated')]);
-  const second = await app.send({type: 'generate', url: pictureURL});
+  const saved = await app.send({type: 'generate', url: pictureURL});
+  assert.equal(saved.image, first.image);
+  assert.equal(app.downloads.length, 1);
+  const second = await app.send({type: 'generate', url: pictureURL, retry:true});
   assert.equal(second.image, image(current.toString()));
   assert.equal(app.downloads.length, 2);
   for (const {options} of app.downloads) {

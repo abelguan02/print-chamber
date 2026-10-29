@@ -18,9 +18,20 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 async function generate(message, tab) {
-  const {token, enabled = true, disabledSites = [], generationMode='local'} = await chrome.storage.local.get(['token', 'enabled', 'disabledSites','generationMode']);
+  const {token, enabled = true, disabledSites = [], generationMode='local', history=[]} = await chrome.storage.local.get(['token', 'enabled', 'disabledSites','generationMode','history']);
   if (!enabled || disabledSites.includes(new URL(tab.url).hostname)) throw new Error('预览已暂停');
+  const retry = message.retry === true;
+  if (!retry) {
+    const saved = history.find(record => record.sourceUrl === message.url);
+    if (saved) return {image:saved.image, seconds:saved.seconds, cached:true, fromHistory:true,
+      recordId:saved.id, provider:saved.provider||'local', model:saved.model,
+      promptHash:saved.promptHash, seed:saved.seed, width:saved.width, height:saved.height};
+  }
+  // Preview is read-only; cloud generation always requires an explicit button action.
+  if (generationMode==='cloud' && message.confirmed!==true)
+    return {needsGeneration:true, confirmationRequired:true};
   if (generationMode==='local' && !token) throw new Error('请点开插件，填写本地连接码或选择云端生成');
+  if (message.type==='preview') return {needsGeneration:true, confirmationRequired:false};
   if (busy) throw new Error('正在处理另一张图片，请稍后重试');
   busy = true;
   const job = activeJob = {url: message.url, discarded: false};
@@ -52,7 +63,7 @@ async function generate(message, tab) {
     }else{
     const response = await fetch(ENDPOINT + '/generate', {
       method: 'POST', headers: {'Content-Type': 'application/octet-stream', 'Authorization': 'Bearer ' + token,
-        ...(message.retry ? {'X-Print-Chamber-Refresh': '1'} : {})},
+        ...(retry ? {'X-Print-Chamber-Refresh': '1'} : {})},
       body: blob, signal: AbortSignal.timeout(45000)
     });
     try { data = await response.json(); }
@@ -61,12 +72,14 @@ async function generate(message, tab) {
       throw new Error('本地服务响应格式异常，请检查服务日志后重试');
     }
     if (!response.ok) throw new Error(data.error || '生成失败，请重试');
+    }
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(CLOUD_PROMPT));
     const expectedHash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
-    if (data.promptHash !== expectedHash) throw new Error('提示词版本不一致，请重启本地模型并刷新作品页');
-    }
+    if (generationMode==='local' && data.promptHash !== expectedHash) throw new Error('提示词版本不一致，请重启本地模型并刷新作品页');
+    data.promptHash = expectedHash;
     try {
       const record = {id: crypto.randomUUID(), image: data.image, seconds: data.seconds, provider:data.provider||'local', model:data.model, sourceUrl: message.url,
+        promptHash:data.promptHash, seed:data.seed, width:data.width, height:data.height,
         pageUrl: tab.url, title: (tab.title || '查看原作').slice(0,200), site: new URL(tab.url).hostname, createdAt: Date.now()};
       await updateHistory(history=>{
         if (job.discarded) return history;
@@ -174,7 +187,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     }).catch(()=>reply({error:'删除失败，请重试'}));return true;
   }
   if(message.type==='open-gallery' && sender.tab){chrome.tabs.create({url:chrome.runtime.getURL('gallery.html')});return}
-  if (message.type !== 'generate' || !sender.tab || sender.id!==chrome.runtime.id) return;
+  if (!['generate','preview'].includes(message.type) || !sender.tab || sender.id!==chrome.runtime.id) return;
   if (typeof message.url !== 'string' || message.url.length > 12000) {
     reply({error: '图片地址无效'}); return;
   }

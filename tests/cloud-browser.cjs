@@ -2,7 +2,7 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');
 const {chromium}=require('playwright');const fs=require('node:fs');const path=require('node:path');
 const root=path.resolve(__dirname,'..');
-test('cloud settings, private keys, trial and hover-to-history across all providers',async()=>{
+test('cloud settings, private keys, trial and explicit print with history reuse',async()=>{
  const profile=fs.mkdtempSync('/private/tmp/print-chamber-cloud-');
  const context=await chromium.launchPersistentContext(profile,{headless:true,executablePath:require('./browser-options.cjs').executablePath,args:[`--disable-extensions-except=${root}/extension`,`--load-extension=${root}/extension`]});
  try{
@@ -74,10 +74,25 @@ test('cloud settings, private keys, trial and hover-to-history across all provid
   const source='https://www.artstation.com/cloud-regression';
   await context.route(source,r=>r.fulfill({contentType:'text/html',body:'<body style="padding:80px"><img id="art" width="240" height="360" src="https://cdna.artstation.com/cloud.png"></body>'}));
   await context.route('https://cdna.artstation.com/cloud.png',r=>r.fulfill({contentType:'image/png',body:fs.readFileSync(require('./browser-options.cjs').fixture)}));
+  const posts=await worker.evaluate(()=>requests.filter(r=>r.method==='POST').length);
   const page=await context.newPage();await page.goto(source);await page.locator('#art').hover();
-  const host=page.locator('print-chamber-overlay');await host.locator('.panel.ready').waitFor({timeout:15000});
+  const host=page.locator('print-chamber-overlay');await host.locator('.panel.waiting').waitFor({timeout:5000});await host.hover();
+  assert.equal(await host.locator('.retry').innerText(),'打印');
+  await page.waitForTimeout(900);
+  assert.equal(await worker.evaluate(()=>requests.filter(r=>r.method==='POST').length),posts,'hover must not call a paid endpoint');
+  await host.locator('.retry').click();await host.locator('.panel.ready').waitFor({timeout:15000});
+  assert.equal(await worker.evaluate(()=>requests.filter(r=>r.method==='POST').length),posts+1);
   assert.match(await host.locator('.caption').innerText(),/云端打印/);
   const storage=await worker.evaluate(()=>chrome.storage.local.get(null));assert.equal(storage.history.length,1);assert.equal(storage.history[0].provider,'google');assert.equal(storage.token,undefined);
+  assert.equal(storage.history[0].promptHash.length,64);
+  await page.reload();await page.locator('#art').hover();await host.locator('.panel.ready').waitFor({timeout:5000});await host.hover();
+  assert.match(await host.locator('.caption').innerText(),/历史打印/);
+  assert.equal(await worker.evaluate(()=>requests.filter(r=>r.method==='POST').length),posts+1);
+  assert.deepEqual((await worker.evaluate(()=>chrome.storage.local.get('history'))).history,storage.history,'viewing must not rewrite records');
+  await worker.evaluate(()=>{rejectNext=true});await host.locator('.retry').click();
+  await page.waitForFunction(()=>document.querySelector('print-chamber-overlay').shadowRoot.querySelector('.caption').textContent.includes('重打失败'));
+  assert.equal(await host.locator('.result').getAttribute('src'),storage.history[0].image);
+  assert.deepEqual((await worker.evaluate(()=>chrome.storage.local.get('history'))).history,storage.history);
   // Web-page content scripts cannot call privileged settings messages.
   const denied=await worker.evaluate(async(tabId)=>{
    const result=await chrome.scripting.executeScript({target:{tabId},func:()=>chrome.runtime.sendMessage({type:'cloud-load'})});return result[0].result;
@@ -87,6 +102,9 @@ test('cloud settings, private keys, trial and hover-to-history across all provid
   await settings.click('#forget');await settings.waitForFunction(()=>document.querySelector('#notice').textContent.includes('密钥已删除'));
   assert.equal(await settings.inputValue('#mode'),'local');
   assert.equal((await worker.evaluate(()=>chrome.storage.local.get('generationMode'))).generationMode,'local');
+  await page.reload();await page.locator('#art').hover();await host.locator('.panel.ready').waitFor({timeout:5000});
+  assert.match(await host.locator('.caption').innerText(),/历史打印.*云端/,'history retains its origin after changing modes and deleting credentials');
+  assert.equal(await worker.evaluate(()=>requests.filter(r=>r.method==='POST').length),posts+2);
   assert.deepEqual(errors,[]);
  }finally{await context.close();fs.rmSync(profile,{recursive:true,force:true});}
 });
