@@ -202,7 +202,8 @@ class Handler(BaseHTTPRequestHandler):
             acquired = lock.acquire(blocking=False)
             if not acquired:
                 return self.respond(409, {'code': 'MODEL_BUSY', 'error': '正在处理另一张图片，请稍后重试'})
-            if key in cache and self.headers.get('X-Print-Chamber-Refresh') != '1':
+            refresh = self.headers.get('X-Print-Chamber-Refresh') == '1'
+            if key in cache and not refresh:
                 cache.move_to_end(key)
                 return self.respond(200, {**cache[key], 'cached': True})
             from PIL import Image, ImageOps, UnidentifiedImageError
@@ -227,10 +228,15 @@ class Handler(BaseHTTPRequestHandler):
             except (UnidentifiedImageError, OSError, ValueError):
                 return self.respond(400, {'code': 'INVALID_IMAGE', 'error': '图片数据损坏或格式不受支持'})
             stage = 'inference'
+            seed = 42
+            if refresh:
+                seed = secrets.randbits(32)
+                if seed == cache.get(key, {}).get('seed', 42):
+                    seed = (seed + 1) % (2 ** 32)
             with torch.inference_mode():
                 result = pipe(image=img, prompt_embeds=embeds, width=w, height=h,
                               num_inference_steps=4, guidance_scale=1.0,
-                              generator=torch.Generator('cpu').manual_seed(42)).images[0]
+                              generator=torch.Generator('cpu').manual_seed(seed)).images[0]
             stage = 'device_sync'
             torch.mps.synchronize()
             stage = 'result_encode'
@@ -238,7 +244,7 @@ class Handler(BaseHTTPRequestHandler):
             result.save(buf, format='JPEG', quality=90)
             data = {'image': 'data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode(),
                     'seconds': round(time.perf_counter() - start, 3), 'cached': False, 'width': w, 'height': h,
-                    'promptHash': prompt_hash}
+                    'promptHash': prompt_hash, 'seed': seed}
             cache[key] = data
             while len(cache) > 24:
                 cache.popitem(last=False)

@@ -33,10 +33,12 @@ class ServiceTests(unittest.TestCase):
             spec.loader.exec_module(self.service)
         s = self.service
         self.calls = 0
+        self.seeds = []
         self.inference_fails = False
 
         def inference(**kwargs):
             self.calls += 1
+            self.seeds.append(kwargs['generator'])
             self.input_image = kwargs['image'].copy()
             if self.inference_fails:
                 raise RuntimeError('device failure ' + s.TOKEN)
@@ -47,7 +49,7 @@ class ServiceTests(unittest.TestCase):
         s.ready = True
         self.torch = patch.dict(sys.modules, {'torch': types.SimpleNamespace(
             inference_mode=contextlib.nullcontext,
-            Generator=lambda _: types.SimpleNamespace(manual_seed=lambda _: None),
+            Generator=lambda _: types.SimpleNamespace(manual_seed=lambda seed: seed),
             mps=types.SimpleNamespace(synchronize=lambda: None))})
         self.torch.start()
         s.Handler.log_message = lambda *args: None
@@ -98,6 +100,31 @@ class ServiceTests(unittest.TestCase):
         with self.service.lock:
             self.assertEqual(self.request()[0], 409)
         self.assertEqual(self.calls, 0)
+
+    def test_refresh_changes_seed_and_caches_the_new_result(self):
+        first = self.request()[1]
+        self.assertEqual(first['seed'], 42)
+        # Even a random draw matching the previous seed must produce a new variant.
+        with patch.object(self.service.secrets, 'randbits', return_value=42):
+            second = self.request(headers={'X-Print-Chamber-Refresh': '1'})[1]
+            third = self.request(headers={'X-Print-Chamber-Refresh': '1'})[1]
+        self.assertNotEqual(second['seed'], first['seed'])
+        self.assertNotEqual(third['seed'], second['seed'])
+        self.assertEqual(self.seeds, [first['seed'], second['seed'], third['seed']])
+        cached = self.request()[1]
+        self.assertTrue(cached['cached'])
+        self.assertEqual(cached['seed'], third['seed'])
+        self.assertEqual(self.calls, 3)
+
+    def test_failed_refresh_keeps_previous_cached_result(self):
+        first = self.request()[1]
+        self.inference_fails = True
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.request(headers={'X-Print-Chamber-Refresh': '1'})[0], 500)
+        cached = self.request()[1]
+        self.assertTrue(cached['cached'])
+        self.assertEqual(cached['image'], first['image'])
+        self.assertEqual(cached['seed'], first['seed'])
 
     def test_invalid_image_is_distinct_from_device_failure(self):
         status, data = self.request(b'not an image')
