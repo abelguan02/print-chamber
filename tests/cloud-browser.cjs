@@ -42,6 +42,11 @@ test('cloud settings, private keys, trial and hover-to-history across all provid
   },image);
   const settings=await context.newPage();const errors=[];settings.on('pageerror',e=>errors.push(e.message));
   await settings.goto(`chrome-extension://${id}/settings.html`);await settings.selectOption('#mode','cloud');
+  await worker.evaluate(()=>chrome.storage.local.set({generationMode:'cloud'}));
+  const missingProvider = await settings.evaluate(()=>chrome.runtime.sendMessage({type:'cloud-check'}));
+  assert.equal(missingProvider.error,'请先在生成设置中选择并保存云端供应商');
+  assert.equal(await worker.evaluate(()=>requests.length),0);
+  await worker.evaluate(()=>chrome.storage.local.remove('generationMode'));
   await settings.check('#consent');
   for(const provider of ['minimax-cn','minimax','bfl','volc','ali','google']){
    await settings.selectOption('#provider',provider);await settings.fill('#key',`fake-${provider}`);

@@ -18,11 +18,17 @@ from runtime_config import STATE, settings
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8877
+UPLOAD_TIMEOUT = 15
 STATE.mkdir(exist_ok=True, mode=0o700)
+STATE.chmod(0o700)
 KEY = STATE / 'token'
-if not KEY.exists():
-    KEY.write_text(secrets.token_urlsafe(32))
-KEY.chmod(0o600)
+try:
+    token_fd = os.open(KEY, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+except FileExistsError:
+    KEY.chmod(0o600)
+else:
+    with os.fdopen(token_fd, 'w') as token_file:
+        token_file.write(secrets.token_urlsafe(32))
 TOKEN = KEY.read_text().strip()
 lock = threading.Lock()
 ready = False
@@ -166,21 +172,36 @@ class Handler(BaseHTTPRequestHandler):
         if not ready:
             return self.respond(503, {'code': 'MODEL_LOAD_FAILED' if failure else 'MODEL_LOADING',
                                       'error': '模型加载失败，请在菜单栏查看运行日志' if failure else '模型正在准备，请稍后重试'})
-        if not lock.acquire(blocking=False):
-            return self.respond(409, {'code': 'MODEL_BUSY', 'error': '正在处理另一张图片，请稍后重试'})
+        acquired = False
         stage = 'request_read'
         try:
-            self.connection.settimeout(15)
+            deadline = time.monotonic() + UPLOAD_TIMEOUT
             try:
                 length = int(self.headers.get('Content-Length', '0'))
             except ValueError:
                 return self.respond(400, {'code': 'INVALID_LENGTH', 'error': '图片传输长度无效'})
             if not 0 < length <= 12 * 1024 * 1024:
                 return self.respond(413, {'error': '图片文件过大'})
-            raw = self.rfile.read(length)
+            raw = bytearray()
+            while len(raw) < length:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError('Upload deadline exceeded')
+                self.connection.settimeout(remaining)
+                # read1 performs at most one socket read, so trickling bytes cannot reset the deadline.
+                chunk = self.rfile.read1(min(65536, length - len(raw)))
+                if time.monotonic() >= deadline:
+                    raise TimeoutError('Upload deadline exceeded')
+                if not chunk:
+                    break
+                raw.extend(chunk)
+            self.connection.settimeout(15)
             if len(raw) != length:
                 return self.respond(400, {'error': '图片传输不完整'})
             key = hashlib.sha256(raw).hexdigest()
+            acquired = lock.acquire(blocking=False)
+            if not acquired:
+                return self.respond(409, {'code': 'MODEL_BUSY', 'error': '正在处理另一张图片，请稍后重试'})
             if key in cache and self.headers.get('X-Print-Chamber-Refresh') != '1':
                 cache.move_to_end(key)
                 return self.respond(200, {**cache[key], 'cached': True})
@@ -190,7 +211,7 @@ class Handler(BaseHTTPRequestHandler):
             start = time.perf_counter()
             stage = 'image_decode'
             try:
-                with Image.open(io.BytesIO(raw)) as img:
+                with Image.open(io.BytesIO(raw), formats=('JPEG', 'PNG', 'WEBP')) as img:
                     if img.width * img.height > 24000000:
                         return self.respond(413, {'code': 'IMAGE_TOO_LARGE', 'error': '图片分辨率过大'})
                     img = ImageOps.exif_transpose(img)
@@ -229,7 +250,8 @@ class Handler(BaseHTTPRequestHandler):
             diagnostic('INFERENCE_FAILED', exc, stage)
             self.respond(500, {'code': 'INFERENCE_FAILED', 'error': '模型推理失败，请在菜单栏查看运行日志，必要时重启模型'})
         finally:
-            lock.release()
+            if acquired:
+                lock.release()
 
 if __name__ == '__main__':
     server = ThreadingHTTPServer(('127.0.0.1', PORT), Handler)

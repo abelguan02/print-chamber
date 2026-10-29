@@ -55,7 +55,11 @@ async function generate(message, tab) {
         ...(message.retry ? {'X-Print-Chamber-Refresh': '1'} : {})},
       body: blob, signal: AbortSignal.timeout(45000)
     });
-    data = await response.json();
+    try { data = await response.json(); }
+    catch (error) {
+      if (error.name !== 'SyntaxError') throw error;
+      throw new Error('本地服务响应格式异常，请检查服务日志后重试');
+    }
     if (!response.ok) throw new Error(data.error || '生成失败，请重试');
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(CLOUD_PROMPT));
     const expectedHash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
@@ -110,6 +114,11 @@ function allowedImageURL(url) {
 
 async function limitedImage(response) {
   const limit = 12000000;
+  const type = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(type)) {
+    await response.body?.cancel();
+    throw new Error('图片格式不受支持，仅支持 JPEG、PNG 或 WebP');
+  }
   if (Number(response.headers.get('content-length')) > limit) {
     await response.body?.cancel();
     throw new Error('图片文件过大');
@@ -125,7 +134,14 @@ async function limitedImage(response) {
       parts.push(value);
     }
   } finally { reader.releaseLock(); }
-  return new Blob(parts, {type: response.headers.get('content-type') || 'application/octet-stream'});
+  const blob = new Blob(parts, {type});
+  const signature = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+  const matches = (bytes, offset = 0) => bytes.every((byte, i) => signature[offset + i] === byte);
+  const valid = type === 'image/jpeg' ? matches([0xff, 0xd8, 0xff]) :
+    type === 'image/png' ? matches([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) :
+    matches([0x52, 0x49, 0x46, 0x46]) && matches([0x57, 0x45, 0x42, 0x50], 8);
+  if (!valid) throw new Error('图片数据与格式不符，仅支持 JPEG、PNG 或 WebP');
+  return blob;
 }
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {

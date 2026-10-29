@@ -16,7 +16,7 @@ function deferred() {
   const promise = new Promise(r => { resolve = r; });
   return {promise, resolve};
 }
-function harness({history = [], generate, download} = {}) {
+function harness({history = [], generate, download, localResponse} = {}) {
   const storage = {token: 'test-token', enabled: true, disabledSites: [], history};
   const requests = [];
   const downloads = [];
@@ -42,6 +42,7 @@ function harness({history = [], generate, download} = {}) {
       return download(String(url), options);
     }
     requests.push(options);
+    if (localResponse) return localResponse();
     const payload = generate ? await generate(options, requests.length) : {
       image: image(await options.body.text()), seconds: 1, cached: false
     };
@@ -130,21 +131,69 @@ for (const url of [
 }
 
 test('approved CDN downloads disallow redirects and revalidate repeated URL content', async () => {
-  let current = 'first image';
+  const png = fs.readFileSync(path.join(__dirname, 'fixtures/artwork.png'));
+  let current = png;
   const app = harness({download: async () => new Response(current, {
-    headers: {'Content-Type': 'image/jpeg'}
+    headers: {'Content-Type': 'image/png'}
   })});
   const first = await app.send({type: 'generate', url: pictureURL});
-  assert.equal(first.image, image('first image'));
-  current = 'new image at same URL';
+  assert.equal(first.image, image(current.toString()));
+  current = Buffer.concat([png, Buffer.from('updated')]);
   const second = await app.send({type: 'generate', url: pictureURL});
-  assert.equal(second.image, image(current));
+  assert.equal(second.image, image(current.toString()));
   assert.equal(app.downloads.length, 2);
   for (const {options} of app.downloads) {
     assert.equal(options.redirect, 'error');
     assert.equal(options.credentials, 'omit');
     assert.equal(options.cache, 'no-cache');
   }
+});
+
+for (const [type, body] of [
+  ['application/postscript', '%!PS-Adobe-3.0 EPSF-3.0'],
+  ['image/jpeg', '%!PS-Adobe-3.0 EPSF-3.0'],
+  ['image/png', '<html>error</html>'],
+  ['image/webp', 'RIFFfakeNOTP'],
+  ['image/png', new Uint8Array([0xff, 0xd8, 0xff])],
+  ['image/png', ''],
+  ['application/octet-stream', '%!PS-Adobe-3.0 EPSF-3.0']
+]) {
+  test(`unsupported or mislabeled download is not sent to the service (${type}, ${String(body).slice(0, 12)})`, async () => {
+    const app = harness({download: async () => new Response(body, {headers: {'Content-Type': type}})});
+    assert.match((await app.send({type:'generate', url:pictureURL})).error, /格式/);
+    assert.equal(app.requests.length, 0);
+    assert.equal(app.storage.history.length, 0);
+  });
+}
+
+for (const [type, signature] of [
+  ['image/jpeg', [0xff, 0xd8, 0xff]],
+  ['image/png; charset=binary', [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]],
+  ['image/webp', [0x52, 0x49, 0x46, 0x46, 4, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]]
+]) {
+  test(`download signatures are checked across stream chunks (${type})`, async () => {
+    const bytes = Uint8Array.from(signature);
+    const app = harness({download: async () => new Response(new ReadableStream({start(controller) {
+      for (const byte of bytes) controller.enqueue(Uint8Array.of(byte));
+      controller.close();
+    }}), {headers: {'Content-Type': type}})});
+    assert.equal((await app.send({type:'generate', url:pictureURL})).error, undefined);
+    assert.deepEqual(new Uint8Array(await app.requests[0].body.arrayBuffer()), bytes);
+  });
+}
+
+for (const status of [200, 502]) {
+  test(`non-JSON local response is a Chinese error with no history write (${status})`, async () => {
+    const app = harness({localResponse: () => new Response('<html>private server detail</html>', {status})});
+    assert.equal((await app.print()).error, '本地服务响应格式异常，请检查服务日志后重试');
+    assert.equal(app.storage.history.length, 0);
+    assert.equal((await app.print()).error, '本地服务响应格式异常，请检查服务日志后重试', 'failure releases busy state');
+  });
+}
+
+test('local response read timeouts keep the timeout message', async () => {
+  const app = harness({localResponse: () => ({json: async () => {throw new DOMException('timed out', 'TimeoutError');}})});
+  assert.match((await app.print()).error, /等待超时/);
 });
 
 test('rejects an unexpected final response URL without forwarding image bytes', async () => {

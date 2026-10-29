@@ -35,6 +35,7 @@ globalThis.CloudConfig = (() => {
   }
   async function active() {
     const {cloudProvider}=await chrome.storage.local.get('cloudProvider');
+    if(!Object.hasOwn(Cloud.providers,cloudProvider))throw Error('请先在生成设置中选择并保存云端供应商');
     return Cloud.validate(await access(cloudProvider));
   }
   async function verified(c) {c.verifiedAt=Date.now();await access(c.provider,c);await chrome.storage.local.set({cloudVerified:true});}

@@ -1,5 +1,12 @@
 import Cocoa
 
+func connectionTokenURL(project: URL, environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
+    let state = environment["PRINT_CHAMBER_STATE"].map {
+        URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath)
+    } ?? project.appendingPathComponent(".local")
+    return state.standardizedFileURL.resolvingSymlinksInPath().appendingPathComponent("token")
+}
+
 final class Helper: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     let stateItem = NSMenuItem(title: "正在检查…", action: nil, keyEquivalent: "")
@@ -107,7 +114,7 @@ final class Helper: NSObject, NSApplicationDelegate {
     @objc func startModel() { run("start") }
     @objc func stopModel() { run("stop") }
     @objc func copyToken() {
-        guard let token = try? String(contentsOf: root.appendingPathComponent(".local/token"), encoding: .utf8)
+        guard let token = try? String(contentsOf: connectionTokenURL(project: root), encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else {
             alert("首次使用请先启动模型，连接码会自动生成。"); return
         }
