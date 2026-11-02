@@ -38,7 +38,7 @@ const {chromium}=require('playwright');
   first.querySelector('a').href='#help';first.querySelector('a').parentNode.firstChild.textContent='连接码在菜单栏小助手中 · ';first.children[1].firstElementChild.id='setup-lcd';
   daily.children[0].lastElementChild.id='connection-led';daily.children[1].children[0].id='dashboard-lcd';daily.children[1].children[1].id='model-info';
   daily.children[2].children[0].children[1].id='site';daily.children[2].querySelector('button').id='enabled';
-  daily.children[3].querySelectorAll('button').forEach((b,i)=>{b.dataset.trigger=i?'alt':'hover';b.setAttribute('aria-pressed',String(!i))});
+  daily.children[3].querySelectorAll('button').forEach((b,i)=>{b.dataset.trigger=i?'alt':'hover';b.setAttribute('aria-pressed',String(!i));if(!i)b.textContent='停留 1.2 秒'});
   daily.children[4].lastElementChild.id='recent';daily.children[4].lastElementChild.innerHTML='';
   daily.querySelector('a').href='gallery.html';daily.querySelector('a').target='_blank';
   return first.outerHTML+daily.outerHTML;
