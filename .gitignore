@@ -16,6 +16,8 @@ node_modules/
 *.p12
 *.pfx
 .local/
+# Personal payment codes shown in the helper's About window
+/menu-helper/sponsor/
 *.log
 
 # Generated outputs and operating-system metadata
