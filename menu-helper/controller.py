@@ -91,13 +91,22 @@ def stop():
         time.sleep(.1)
     return {'state': 'error', 'label': '停止尚未完成，请稍后查看'}
 
+def restart():
+    current = status()
+    if current['state'] == 'busy':
+        return {**current, 'message': '请等当前图片生成完毕后再重启'}
+    if current['state'] != 'stopped':
+        current = stop()
+    # Only start after our own service is confirmed gone; never fight a port conflict.
+    return start() if current['state'] == 'stopped' else current
+
 if __name__ == '__main__':
     STATE.mkdir(exist_ok=True, mode=0o700)
     try:
         with (STATE / 'menu-helper.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
             action = sys.argv[1] if len(sys.argv) > 1 else 'status'
-            print(json.dumps({'status': status, 'start': start, 'stop': stop}[action](), ensure_ascii=False))
+            print(json.dumps({'status': status, 'start': start, 'stop': stop, 'restart': restart}[action](), ensure_ascii=False))
     except Exception as exc:
         print('CONTROL_FAILED: ' + type(exc).__name__, file=sys.stderr, flush=True)
         print(json.dumps({'state': 'error', 'code': 'CONTROL_FAILED', 'label': '操作失败，请查看运行日志'}, ensure_ascii=False))
