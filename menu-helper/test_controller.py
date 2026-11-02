@@ -37,4 +37,16 @@ class LifecycleTests(unittest.TestCase):
         with patch.object(c,'command',side_effect=['99','python service.py','p99\nn/tmp/other']):
             self.assertEqual(c.owner(),(99,False))
 
+    def test_busy_generation_is_not_restarted(self):
+        with patch.object(c,'status',return_value={'state':'busy'}), patch.object(c,'stop') as stop, patch.object(c,'start') as start:
+            self.assertEqual(c.restart()['state'],'busy'); stop.assert_not_called(); start.assert_not_called()
+
+    def test_restart_starts_only_after_confirmed_stop(self):
+        with patch.object(c,'status',return_value={'state':'ready'}), patch.object(c,'stop',return_value={'state':'stopped'}), patch.object(c,'start',return_value={'state':'loading'}) as start:
+            self.assertEqual(c.restart()['state'],'loading'); start.assert_called_once()
+
+    def test_restart_does_not_start_after_failed_stop(self):
+        with patch.object(c,'status',return_value={'state':'ready'}), patch.object(c,'stop',return_value={'state':'conflict'}), patch.object(c,'start') as start:
+            self.assertEqual(c.restart()['state'],'conflict'); start.assert_not_called()
+
 if __name__ == '__main__': unittest.main()

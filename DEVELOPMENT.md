@@ -31,6 +31,9 @@ open "Print Chamber 小助手.app"
 ```
 
 App 当前引用项目位置。移动项目后重新构建；它尚不是自包含的分发安装包。
+小助手版本号在构建时读取 `extension/manifest.json`，与扩展保持一致。
+关于窗口的自愿赞助收款码为可选文件：放入 `menu-helper/sponsor/wechat.png`、`alipay.png`（也接受 `.jpg`），
+下次打开关于窗口即显示，无需重新构建；缺失时显示“收款码暂未添加”。
 
 ## 开发依赖与测试
 
