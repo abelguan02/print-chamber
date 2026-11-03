@@ -47,6 +47,7 @@ Python 测试和菜单栏小助手验证命令见 [DEVELOPMENT.md](DEVELOPMENT.m
 | `runtime_config.py`、`configure-local.py`、`start-local.command` | 本机路径配置与启动入口 |
 | `menu-helper/` | macOS 菜单栏助手源码 |
 | `design-reference/`、`build-design.cjs` | 已采用设计来源与编译工具 |
+| `extension/icons/`、`build-icons.cjs` | 扩展与小助手共用的统一图标及生成工具 |
 | `tests/`、根目录测试脚本 | 自动回归与验证工具 |
 | `baselines/`、`BASELINE.txt` | 不可覆盖的历史归档与采用决定 |
 | `work/` | 开发交接、检查记录与独立实验脚本 |
