@@ -16,6 +16,7 @@ test('About page: manifest version, links, clipboard feedback, responsive layout
   await page.goto(base+'/about.html');
   await page.waitForFunction(()=>!document.querySelector('#copy-version').disabled);
   const version=require('../extension/manifest.json').version;
+  assert.ok(await page.locator('.app-icon').evaluate(img=>img.complete&&img.naturalWidth>0),'Unified icon renders on the About page');
   assert.equal(await page.locator('#version').textContent(),'v'+version);
   await page.evaluate(()=>{Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async value=>{window.copied=value}}})});
   await page.locator('#copy-version').click();

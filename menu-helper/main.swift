@@ -226,9 +226,9 @@ final class Helper: NSObject, NSApplicationDelegate {
                                  backing: .buffered, defer: false)
         window.title = "关于 Print Chamber"
         window.isReleasedWhenClosed = false
-        let icon = NSImageView(image: NSImage(systemSymbolName: "printer.fill", accessibilityDescription: nil)!)
-        icon.symbolConfiguration = .init(pointSize: 36, weight: .regular)
-        icon.contentTintColor = .labelColor
+        let icon = NSImageView(image: NSApp.applicationIconImage)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: 80), icon.heightAnchor.constraint(equalToConstant: 80)])
         let versionText = text("菜单栏小助手 v\(version)", size: 12, color: .secondaryLabelColor)
         versionText.isSelectable = true
         let header = stack([icon, text("Print Chamber", size: 20, weight: .semibold), versionText,

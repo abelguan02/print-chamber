@@ -32,6 +32,8 @@ open "Print Chamber 小助手.app"
 
 App 当前引用项目位置。移动项目后重新构建；它尚不是自包含的分发安装包。
 小助手版本号在构建时读取 `extension/manifest.json`，与扩展保持一致。
+统一图标的源文件是 `extension/icons/icon.svg`（16/32 px 使用简化版 `icon-small.svg`）。修改后运行 `npm run build:icons`，
+重新生成扩展 PNG 与 `menu-helper/AppIcon.icns`，再运行 `menu-helper/build.py` 打包进小助手。
 关于窗口的自愿赞助收款码为可选文件：放入 `menu-helper/sponsor/wechat.png`、`alipay.png`（也接受 `.jpg`），
 下次打开关于窗口即显示，无需重新构建；缺失时显示“收款码暂未添加”。
 
