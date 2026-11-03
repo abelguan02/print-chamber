@@ -59,6 +59,7 @@ final class Helper: NSObject, NSApplicationDelegate {
         startItem = item("启动模型", #selector(startModel), menu)
         stopItem = item("停止模型", #selector(stopModel), menu)
         restartItem = item("重启模型", #selector(restartModel), menu)
+        startItem.isEnabled = false; stopItem.isEnabled = false; restartItem.isEnabled = false
         let hint = NSMenuItem(title: "仅手动启动 · 不随登录加载模型", action: nil, keyEquivalent: "")
         hint.isEnabled = false; menu.addItem(hint)
         menu.addItem(.separator())
@@ -99,7 +100,9 @@ final class Helper: NSObject, NSApplicationDelegate {
             return
         }
         pending = true
-        startItem.isEnabled = false; stopItem.isEnabled = false; restartItem.isEnabled = false
+        if action != "status" {
+            startItem.isEnabled = false; stopItem.isEnabled = false; restartItem.isEnabled = false
+        }
         if let progress = ["start": "正在启动…", "stop": "正在停止…", "restart": "正在重启…"][action] {
             stateItem.title = progress; flashUntil = .distantPast
         }
@@ -135,9 +138,11 @@ final class Helper: NSObject, NSApplicationDelegate {
                 let label = response["label"] as? String ?? "状态未知"
                 self.state = state
                 self.controllerFailed = state == "error"
-                self.startItem.isEnabled = state == "stopped"
-                self.stopItem.isEnabled = ["ready", "loading", "failed", "unreachable"].contains(state)
-                self.restartItem.isEnabled = self.stopItem.isEnabled
+                let canStart = state == "stopped"
+                let canStop = ["ready", "loading", "failed", "unreachable"].contains(state)
+                if self.startItem.isEnabled != canStart { self.startItem.isEnabled = canStart }
+                if self.stopItem.isEnabled != canStop { self.stopItem.isEnabled = canStop }
+                if self.restartItem.isEnabled != canStop { self.restartItem.isEnabled = canStop }
                 self.statusItem.button?.toolTip = "Print Chamber · " + label
                 if Date() >= self.flashUntil {
                     self.stateItem.title = label
