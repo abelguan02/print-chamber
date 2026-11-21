@@ -20,6 +20,14 @@ node experiments/codex-imagegen/run.cjs --first-image-once
 
 ## 查询出图条件（提交 0 张）
 
+### 同版本官方实现与本机资格核查
+
+桌面端所用的 Codex 版本 `0.171.0-alpha.13` 在创建 app-server 的线程时安装内置图片组件，由 Codex 自己管理认证。该版本的官方集成测试在模拟 ChatGPT 登录、无 API Key 的条件下，检查模型能看到 `image_gen__imagegen`，也覆盖调用和编辑随消息提交的参考图。因此 Print Chamber 本机版可以沿用现有 app-server 接口。当前机器上首图未出，仍以先前的实机结果为准。[组件安装](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/app-server/src/extensions.rs#L118-L126) · [工具可见性与调用测试](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/app-server/tests/suite/v2/imagegen_extension.rs#L958-L1077) · [参考图编辑测试](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/app-server/tests/suite/v2/imagegen_extension.rs#L859-L913)
+
+注册工具时，Codex 会检查出图开关、账号方案、供应商出图能力、模型图片输入能力和认证方式。下方离线实验使用空白账号且把供应商设为 `requires_openai_auth=false`，这会使它跳过图片工具。因此那 21 个函数只能说明空白模拟环境的情况。针对已有登录的补查只调用账号、供应商、功能和模型查询接口，未创建线程或提交模型请求。本地记录为 `output/codex-image-registration-fx3xfopq/results.json`。[同版注册条件](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/core/src/tools/spec_plan.rs#L821-L855)
+
+此结论的适用范围是使用本机 Codex 管理登录的个人本地应用。OpenAI 对商业或托管服务另有认证要求，面向第三方的 Sign in with ChatGPT 预览路线目前也明确排除图像生成。[app-server 认证说明](https://learn.chatgpt.com/docs/app-server#auth-endpoints) · [第三方登录预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)
+
 ### code_mode 离线对照
 
 使用同一份经签名核验的桌面端 0.171.0-alpha.13 和随包的 `gpt-6.2-sol` 模型表（`tool_mode=code_mode_only`）。每组使用空白配置，保持图片功能开启、只读临时会话、禁止子进程。模拟供应商的 `modelProvider/capabilities/read` 返回 `imageGeneration=true`。只放行本机模拟服务端口，向它发送相同的纯文字，服务返回固定文字。两组均正常完成。
