@@ -4,23 +4,21 @@
 
 ## 目标
 
-验证能否通过用户本机已登录的 Codex（ChatGPT 账号额度）把一张原画按 G3 提示词重绘成 3D 风格，并量化耗时、成功率、额度消耗与效果。**只做独立实验，不接入扩展、服务或小助手。**结论用于决定是否开发“Codex 生成方式”。
+**先用用户日常已经登录的本机 Codex，直接把第 1 张原画按既有 G3 提示词重绘成 3D 风格，全程零次重新登录。** 先做独立实验。只有“复用了既有登录”和“交付了可核验的首图重绘”两项都通过，才进入扩展一键连接阶段。两个阶段都只支持 Codex。
 
-已知前提（2026-11-20 在开发机确认）：`codex-cli 0.156.1`，`codex login status` 为 “Logged in using ChatGPT”，`codex features list` 中 `image_generation` 为 stable/true。
+2026-11-20 在开发机记录过 `codex-cli 0.156.1` 已通过 ChatGPT 登录，并启用了 `image_generation`。2026-11-21 的首图测试使用了应用包内的 0.171.0-alpha.13 和一次新的临时登录，提交 1 张，图片工具调用 0 次，产图 0 张。**直接复用日常登录完成首图重绘仍待验证。**
 
-## 范围
+## 第一阶段范围
 
-新增目录 `experiments/codex-imagegen/`，所有代码与说明放在这里。不修改仓库中任何已有文件（`.gitignore` 除外，若需要忽略实验输出）。输出写入被忽略的 `output/codex-imagegen-<时间戳>/`。
+独立实验沿用 `experiments/codex-imagegen/`，输出写入被忽略的 `output/codex-imagegen-<时间戳>/`。除本任务单和必要的输出忽略规则外，变更限于实验目录。本阶段不改扩展、服务或小助手。使用 Node.js 22，不新增 npm 依赖。确需依赖时先说明理由。
 
-语言：Node.js 22（与仓库开发依赖一致），不新增 npm 依赖；如确需依赖先在回复中说明理由。
+## 第一阶段接入与停止条件
 
-## 接入方式（必须遵守）
-
-- 通过官方 `codex app-server`（stdio，换行分隔 JSON-RPC）驱动，由脚本 `spawn('codex', ['app-server', ...])` 启动子进程。
-- 使用 Codex 自己管理的 ChatGPT 登录。**不得读取、复制、解析 `~/.codex/auth.json` 或任何 token，不设置 `ACCESS_TOKEN`。**
-- 协议以本机版本为准：先运行 `codex app-server generate-json-schema --out <临时目录>`（或 `generate-ts`），按生成的 schema 实现，不凭记忆猜方法名。基本流程：`initialize`（`clientInfo: {name:"print-chamber-spike", title:"Print Chamber", version}`）→ `initialized` → `thread/start` → `turn/start` → 监听事件直到 `turn/completed`。
-- 子进程工作目录为每次运行新建的空临时目录；沙箱只读、不允许执行命令与写文件以外的副作用；审批策略设为不需要人工审批（以 schema 中可用选项为准）。若出图结果需要写文件，只允许写入该临时目录。
-- 原画以本地图片输入项（schema 中的 local image 类型）附带，不要把图片 base64 塞进文本提示。
+1. 找到用户日常使用、已经登录的本机 Codex CLI，记录实际版本。不写死某个应用包内部路径。同一可执行文件、同一既有登录配置贯穿预检和生成。若无法在授权范围内使用这份 CLI，记录原因并停止。用该版本的 `codex app-server generate-json-schema --out <临时目录>`（或 `generate-ts`）核对协议。助手和实验脚本不得读取 `~/.codex` 下的文件，不读取、复制或记录任何令牌、API Key 或浏览器 Cookie，不设置 `ACCESS_TOKEN`。由官方 Codex 自行使用其管理的登录。
+2. 实验脚本通过 `spawn('codex', ['app-server', ...])` 启动官方服务，以 stdio 传输换行分隔的 JSON-RPC。完成 `initialize`（`clientInfo: {name:"print-chamber-spike", title:"Print Chamber", version}`）→ `initialized` → `account/read`。返回的账号类型须为 `chatgpt`。关闭本次子进程，再用相同配置连接一次，两次都应直接识别已有登录。整个过程不创建登录配置、不替换日常 `CODEX_HOME`、不更改凭据存储方式，不调用登录命令、不打开授权页面。未登录、已过期或无法确认账号类型时，记录原因并停止。
+3. 临时化的是每次任务新建的空工作目录和会话。模型任务只读、禁审批，关闭命令执行、网页搜索和 MCP。图片文件只允许写入本次临时目录，再由实验脚本保存报告副本。预检和真实首图使用相同的权限设置。应用包版本 0.171.0-alpha.13 曾在安装状态文件不可写时于握手前退出。若既有登录与当前写入限制不相容，或只能从禁止访问的目录取得结果，记录已证实的冲突及未知项，停止该路线。不得以放宽权限、临时登录、API Key 或桌面聊天代跑作为通过。
+4. 提交图片前，检查 `image_generation` 已启用、供应商声明支持图片生成（本机协议为 `modelProvider/capabilities/read`）、所选模型支持图片输入，并读取可用的账号限额。供应商能力或登录状态无法确认、能力关闭、账号明确拒绝使用额度时，不提交原画。预检结果记为“可尝试首图”，实际出图能力以工具事件和图片为准。
+5. 选择 `metrics.json` 中第 1 张原画，校验其 SHA-256。校验通过后，用 `thread/start` 建立临时只读会话，以本地图片输入项（`localImage`）和下述提示词发送一次 `turn/start`，监听至 `turn/completed`。不将图片 base64 塞进文本。校验失败或该张不可读时停止，不替换为第 2 张。
 
 ## 提示词
 
@@ -29,19 +27,20 @@
 
 ## 测试样本
 
-使用 `output/scenes-g3-20261025-060950/metrics.json` 中 `sources` 的 5 张原画（路径与 sha256 在文件中；运行前校验 sha256，不一致则跳过并记录）。同目录下 `1-G3.png`…`5-G3.png` 是本地 FLUX G3 结果，用于对比。
+第一阶段只用 `output/scenes-g3-20261025-060950/metrics.json` 中 `sources[0]`（id 为 1）的原画，同目录的 `1-G3.png` 是这张图的本地 FLUX 对照。保留另外 4 张供以后另行安排的整组评估。本阶段不提交。
 
 ## 运行方式与额度保护
 
+以下命令用于后续验证。本次只修订任务单。
+
 ```sh
-node experiments/codex-imagegen/run.cjs --dry-run       # 只做握手、列模型/账号限额，不出图
-node experiments/codex-imagegen/run.cjs --limit 1       # 只跑第 1 张
-node experiments/codex-imagegen/run.cjs --all           # 跑全部 5 张
+node experiments/codex-imagegen/run.cjs --dry-run       # 复用日常登录，检查连接和能力，提交 0 张
+node experiments/codex-imagegen/run.cjs --limit 1       # 沿用相同登录及权限，仅尝试第 1 张一次
 ```
 
-- 不带 `--limit` 或 `--all` 时默认等同 `--dry-run`，避免误耗额度。
-- 每张图单独一个 thread，串行执行；单张超时 5 分钟，超时记为失败并结束该 turn（使用 schema 中的中断方法）。
-- 若 schema 提供账号限额读取（如 rate limits 相关方法），在每张图前后各读取一次并记录。
+- 默认无参只做预检。`--login-check` 和 `--login-first-image` 属于历史临时登录实验，本任务不使用。禁止开发阶段运行 `--all`。原有开发硬上限仍为 `--limit 1` 最多两次，失败不自动重试。第二次真实提交需用户另行确认。
+- 单张超时 5 分钟，超时记为失败，按协议中断并回收本次进程。若开发沙箱禁止启动官方服务或联网，只完成允许的离线检查，说明阻碍并给出用户在普通终端用现有登录验证的最短命令。不得要求用户以重新登录来排错。
+- 若 schema 提供账号限额读取，在首图提交前后各读取一次，区分不可观测、读数未变化和额度耗尽。
 
 ## 记录与报告
 
@@ -49,24 +48,31 @@ node experiments/codex-imagegen/run.cjs --all           # 跑全部 5 张
 
 产出：
 
-- `output/codex-imagegen-<时间戳>/results.json`：上述原始记录 + 运行环境（codex 版本、外层指令、G3 sha256）。
+- `output/codex-imagegen-<时间戳>/results.json`：上述原始记录、运行环境（Codex 版本、外层指令、G3 SHA-256），以及本次是否沿用日常登录、两次连接的账号类型和预检结果。只记录验证所需的状态。
 - `output/codex-imagegen-<时间戳>/comparison.html`：每行“原画 | 本地 FLUX G3 | Codex”三列并排，下方列出耗时与状态。图片用相对路径引用复制到该目录的文件。
 - `experiments/codex-imagegen/README.md`：如何运行、协议要点（实际用到的方法名与事件名）、已知限制。
 
 ## 必须回答的问题（写在回复与 results.json 的 `findings` 中）
 
 1. Codex 能否以附带原画为参考出图（图生图），还是只能文生图？
-2. 5 张中实际调用图片生成并产出图片的比例。
-3. 单张耗时中位数与最大值。
-4. 额度消耗是否可观测；若可，每张约占多少。
+2. 首图实际提交几次、产图几张？其余 4 张标为未测。5 张未全部实际提交前，全组成功率填“未验证”。
+3. 首图的提交至终态耗时是多少？若取得图片，注明成功样本数后给出中位数与最大值。失败耗时单列。
+4. 额度消耗是否可观测？本次首图尝试的前后读数变化是多少？
 5. 输出图片的格式、尺寸及文件位置（是否由 Codex 写到临时目录之外，例如 `~/.codex` 下）。
-6. 未登录、额度用尽、`image_generation` 关闭时分别返回什么错误（能复现的就复现；不能复现的写明未验证）。
+6. 未登录、额度用尽、`image_generation` 关闭时分别返回什么错误？可用模拟响应验证错误处理。请保留日常账号与配置，真实返回未观察到时写“未验证”。
 7. 本机检测 Codex 可用性的最小可靠步骤（命令与判断条件），供后续自动扫描使用。
 
-## 验收标准
+## 第一阶段验收标准
 
-1. `--dry-run` 能在不出图的情况下完成握手并退出，进程无残留（`pgrep -f "codex app-server"` 为空）。
-2. `--limit 1` 产出 `results.json` 与 `comparison.html`，并回答上述 7 个问题中能回答的部分。
-3. 代码中没有读取 `~/.codex` 下文件或处理 token 的逻辑（审核时 `grep -rn "auth.json\|ACCESS_TOKEN\|\.codex/" experiments/` 应仅出现在注释或 README 的禁止说明中）。
-4. 仓库其他文件无改动（`git diff --stat main` 只含 `experiments/` 与可能的 `.gitignore`）。
-5. `--all` 不由 Codex 在开发时运行，留给用户执行（避免开发过程消耗大量额度）；开发阶段最多运行 `--limit 1` 两次。
+1. **既有登录可复用。** 在与首图一致的启动和权限设置下，零出图预检完成握手。断开再连仍识别为 ChatGPT 登录，全程无新登录。退出后本次启动的进程无残留，保留其他正常使用的 Codex 进程。
+2. **确实重绘了第 1 张。** 记录一次实际提交、对应会话中完成的 `imageGeneration` 工具事件、可解码的输出图片及其格式和尺寸。`comparison.html` 能并排显示第 1 张原画、`1-G3.png` 和 Codex 结果。若事件提供输入 SHA-256，必须与原画匹配。若该版本未提供，记录所附原画的哈希，结合对比图人工核对主体和构图，标明证据来源。哈希不符或参考关系无法确认时，该项不通过。仅有模型文字、工具开关或 `turn/completed` 均不算产图。
+3. **失败也要可判读。** `results.json` 与对比页区分“未提交”“已提交但没有工具调用”“工具已调用但未取得有效图片”“已取得首图”。回答上述 7 问，未验证的项说明原因。成功交付报告本身不足以进入第二阶段。
+4. **遵守范围与限额。** 检查分支差异仅含本任务单、实验目录与可能的 `.gitignore`。审核实验代码没有读取用户凭据或处理令牌的逻辑。运行 `grep -rn "auth.json\|ACCESS_TOKEN\|\.codex/" experiments/`，匹配只应出现在禁止说明或注释里。开发阶段不跑全组，不自动重试，不触碰另外 4 张原画的生成额度。
+
+## 第二阶段（首图验收通过后接入扩展）
+
+第一阶段第 1、2 项均有真实证据且满足其余约束后，才开始此阶段。此前仅记录方案，不开发扩展连接功能。
+
+- 首次安装时登记 Chrome Native Messaging 本机助手，白名单只允许 Print Chamber 的扩展 ID。扩展后台通过 `chrome.runtime.connectNative()` 按需启动助手。助手定位用户日常使用的 Codex，直连官方 `codex app-server`。只发现和连接 Codex，不扫描或启动 Claude Code，不引入 ACP 多 Agent 适配层。
+- 用户在现有扩展界面点一次“连接本机 Codex”，助手以第一阶段验过的方式读取账号状态，成功后显示“已连接”。连接按钮提交 0 张。断开重连仍复用已有有效登录。账号不可用时显示原因，不自动发起登录。
+- 用户明确点击现有生成操作时才提交原画。验收要求图片通过这条实际连接返回，并在现有界面显示。未产生图片时显示对应状态，不自动重试。不另做演示页面。
