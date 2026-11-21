@@ -73,7 +73,7 @@ test('dry probes stop before thread creation, paginate and omit account metadata
   assert.equal(checks.ready, false);
 });
 
-async function turnFixture(t, handler, timeoutMs, directImage = false) {
+async function turnFixture(t, handler, timeoutMs, directImage = false, effort) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pc-rpc-fixture-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const outputDir = path.join(root, 'out');
@@ -96,7 +96,7 @@ async function turnFixture(t, handler, timeoutMs, directImage = false) {
   };
   const promise = runTurn({
     client, listen: cb => { notify = cb; }, record, source: { id: 1, sha256: 'b'.repeat(64) },
-    prompt: ' G3\n', model: 'sample', tempRoot: root, cwd: root, outputDir, timeoutMs, directImage,
+    prompt: ' G3\n', model: 'sample', tempRoot: root, cwd: root, outputDir, timeoutMs, directImage, effort,
   });
   return { record, calls, outputDir, promise };
 }
@@ -108,6 +108,7 @@ test('a reference, an image event, real pixels and a matching turn produce a por
 }, async t => {
   const { record, calls, outputDir, promise } = await turnFixture(t, (method, params, notify, dir) => {
     assert.equal(method, 'turn/start');
+    assert.equal(Object.hasOwn(params,'effort'), false);
     assert.equal(params.input[0].text, INSTRUCTION + '\n\n G3\n');
     assert.deepEqual(params.input[1], { type: 'localImage', path: path.join(dir, '1-original.png') });
     const notifyItem = item => notify('item/completed', { threadId: 'T', turnId: 'U', item });
@@ -132,6 +133,7 @@ test('a reference, an image event, real pixels and a matching turn produce a por
 
 test('direct Codex printing accepts the first tool completion without another model turn', {skip: process.platform !== 'darwin'}, async t => {
   const {record,promise,calls}=await turnFixture(t,(_method,params,notify)=>{
+    assert.equal(params.effort,'low');
     const [text,image]=params.input;
     assert.ok(text.text.includes(JSON.stringify([image.path])));
     assert.ok(text.text.endsWith(' G3\n'));
@@ -139,7 +141,7 @@ test('direct Codex printing accepts the first tool completion without another mo
       id:'image-1',type:'imageGeneration',status:'completed',result:tinyPng,inputImages:[{sha256:'b'.repeat(64)}],
     }});
     return {turn:{id:'U'}};
-  },5000,true);
+  },5000,true,'low');
   await promise;
   assert.equal(record.status,'success');
   assert.deepEqual(record.timings,{submitToDrawMs:null,drawToReceiveMs:null,receiveToDisplayMs:null});
