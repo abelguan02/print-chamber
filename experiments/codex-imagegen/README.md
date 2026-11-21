@@ -33,6 +33,12 @@ node experiments/codex-imagegen/run.cjs --first-image-once
 
 另外用随包的 `gpt-5.5` 模型表校验接收器，读到 6 个显式工具，包括看图用的 `view_image`。对目标模型，切换开关没有改变首个请求中可见的图片工具声明。动态工具清单与先前已登录的真实会话仍未知。两组均未调用模型或图片服务。观察数据在 `output/codex-offline-code-mode-8t_1rcyd/results.json`。
 
+### 真实会话工具清单查询（纯文字）
+
+桌面端 Codex 0.171.0-alpha.13 返回 `account.type=chatgpt`。在与首图相同的 `gpt-6.2-sol`、只读权限和 `code_mode=false` 下，发送了 1 条文字请求，要求查询 `ALL_TOOLS` 中的图片工具名称。该轮正常结束，模型回复 `CATALOG_UNAVAILABLE`。只观察到用户消息和助手文字，结束清单是摘要，未取得结构化工具输出。没有附图，也未观测到出图调用。Print Chamber 会话里的图片工具仍未确认。报告为 `output/codex-live-catalog-URZYqK/results.json`。
+
+同机当前的 Codex 桌面聊天直接查询动态清单，返回 `image_gen__imagegen`，对应绑定的类型为 `function`。该项只验证桌面聊天自身的工具注册。
+
 ### 零提交预检
 
 使用已通过登录复用实测的桌面端连接，在工作树根目录运行：
