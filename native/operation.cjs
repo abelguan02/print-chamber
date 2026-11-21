@@ -68,7 +68,7 @@ async function operate(request, signal) {
     const source={id:1,sha256:createHash('sha256').update(bytes).digest('hex')};
     const record={firstEventMs:null};
     await runTurn({client,listen:fn=>{listener=fn;},record,source,prompt:globalThis.CLOUD_PROMPT,
-      model,effort:'low',tempRoot:temp,cwd:temp,outputDir:temp,inputPath,singleAttempt:true,directImage:true});
+      model,tempRoot:temp,cwd:temp,outputDir:temp,inputPath,singleAttempt:true,directImage:true});
     await client.close();
     const image = await preparePrint(temp, record);
     return {image, seconds:record.durationMs/1000, provider:'codex', model, timings:record.timings, receivedAt:record.receivedAt};

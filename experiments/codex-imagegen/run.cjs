@@ -209,7 +209,7 @@ async function startImageThread(client, {cwd, model, singleAttempt, directImage}
 }
 
 // Only one fresh thread is active. Notifications can precede the turn/start reply.
-async function runTurn({ client, listen, record, source, prompt, model, effort, tempRoot, cwd, outputDir,
+async function runTurn({ client, listen, record, source, prompt, model, tempRoot, cwd, outputDir,
   inputPath = path.join(outputDir, record.sourceImage), allowedImageRoots, singleAttempt = false, directImage = false, timeoutMs = TURN_MS }) {
   const threadId = await startImageThread(client, {cwd, model, singleAttempt, directImage});
   let turnId;
@@ -300,7 +300,6 @@ async function runTurn({ client, listen, record, source, prompt, model, effort, 
     record.startedAt = new Date().toISOString();
     start = performance.now();
     const submit = client.request('turn/start', {
-      ...(effort && {effort}),
       threadId, input: [
         { type: 'text', text: (directImage ? 'Use image_gen.imagegen with referenced_image_paths=' + JSON.stringify([inputPath]) + '. Follow this exact G3 prompt:' : INSTRUCTION) + '\n\n' + prompt },
         { type: 'localImage', path: inputPath },
