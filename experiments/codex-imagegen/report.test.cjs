@@ -46,7 +46,7 @@ test('findings distinguish plans, attempts, actual images and window resets', as
     usedPercent: used, resetsAt: reset, windowDurationMins: 300,
   } } });
   const records = [
-    { id: 1, status: 'success', attempted: true, imageToolCalled: true, referenceHashMatched: true,
+    { id: 1, status: 'success', attempted: true, imageToolCalled: true, referenceHashMatched: true, turnStatus: 'completed',
       outputImage: '1.png', durationMs: 2000, width: 32, height: 32, format: 'PNG',
       rateLimitsBefore: quota(30, 200), rateLimitsAfter: quota(31, 200) },
     { id: 2, status: 'failed', attempted: true, imageToolCalled: true, durationMs: 3000,
@@ -61,11 +61,18 @@ test('findings distinguish plans, attempts, actual images and window resets', as
   assert.equal(findings[1].attempted, 2);
   assert.equal(findings[1].produced, 1);
   assert.equal(findings[1].fullSetRate, null);
+  assert.deepEqual(findings[1].untested, [3, 4, 5]);
+  assert.equal(findings[2].firstTerminalMs, 2000);
   assert.equal(findings[2].medianMs, 2000);
+  assert.deepEqual(findings[2].failures, [{ sample: 2, durationMs: 3000, turnStatus: null }]);
+  assert.match(findings[2].answer, /停止等待耗时 3 秒/);
   assert.equal(findings[3].perSample[0].changes[0].changeInPercentagePoints, 1);
   assert.equal(findings[3].perSample[1].changes[0].changeInPercentagePoints, null);
   const html = await fs.readFile(path.join(dir, 'comparison.html'), 'utf8');
   assert.match(html, /src="1.png"/);
+  assert.match(html, /已取得首图 · 原画输入哈希匹配/);
+  assert.match(html, /工具已调用，未取得有效图片/);
+  assert.match(html, /样本 3 · 未提交/);
   assert.match(html, /&lt;img src=x&gt;/);
   for (const id of [4, 5]) records.push({ id, status: 'skipped', attempted: false });
   await writeReport(dir, results);
@@ -86,6 +93,8 @@ test('dry run cannot report fabricated observations', async t => {
   assert.equal(results.findings[1].fullSetRate, null);
   assert.equal(results.findings[2].medianMs, null);
   assert.equal(results.findings[2].maxMs, null);
+  assert.equal(results.findings[2].firstTerminalMs, null);
+  assert.deepEqual(results.findings[2].failures, []);
   assert.deepEqual(results.findings[4].images, []);
   assert.equal(results.findings[5].featureDisabled, '未验证');
 
@@ -97,4 +106,20 @@ test('dry run cannot report fabricated observations', async t => {
   assert.equal(results.findings[1].attempted, 0);
   assert.equal(results.findings[1].measuredRate, null);
   assert.equal(results.findings[1].fullSetRate, null);
+});
+
+test('first submission ending with text only has a failure duration and no measured full-set rate', async t => {
+  const dir = await tempDir(t);
+  const results = { records: [{
+    id: 1, status: 'failed', attempted: true, turnStatus: 'completed', durationMs: 17814, imageToolCalled: false,
+  }] };
+  await writeReport(dir, results);
+  assert.match(results.findings[1].answer, /首图提交 1 次，产图 0 张。样本 2、3、4、5 未测。全组成功率未验证/);
+  const timing = results.findings[2];
+  assert.equal(timing.firstTerminalMs, 17814);
+  assert.equal(timing.count, 0);
+  assert.equal(timing.medianMs, null);
+  assert.match(timing.answer, /首图失败，从提交至终态耗时 17.814 秒/);
+  assert.equal(results.records[0].outcome, '已提交，未观测到图片工具调用');
+  assert.match(await fs.readFile(path.join(dir, 'comparison.html'), 'utf8'), /已提交，未观测到图片工具调用/);
 });

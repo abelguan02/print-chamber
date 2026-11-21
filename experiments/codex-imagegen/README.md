@@ -2,40 +2,25 @@
 
 用本机 Codex 的 ChatGPT 登录，在独立会话里按 Print Chamber 的 G3 原文重绘一张原画。默认在出图使用的 macOS 隔离条件下检查启动、协议和账号状态。单图成功率、耗时和额度来自实际发出的请求；视觉还原程度需要看三列对比图。
 
-## 临时登录预检（0 张）
+## 使用已有登录试第一张
 
-在本机终端执行 `node experiments/codex-imagegen/run.cjs --login-check`。此模式自选 ChatGPT 应用包内的原生 CLI，在本次 0700 临时目录中建立独立配置。它先按出图时的进程隔离策略启动服务并握手；这一步通过后，终端才运行官方登录。请在官方页面选择原本使用的 ChatGPT 账号，回到终端等待结果。CLI 通过临时配置管理此次登录，登录过程只连接到用户的终端。
-
-登录完成后，脚本用同一临时配置重新启动隔离服务，检查 ChatGPT 登录类型、图片功能、模型和限额。成功的最后一行是“临时登录预检通过，已提交 0 张。”实验只核对账号类型，账号选择由本人确认。此命令跳过图片素材，不创建 thread 或 turn。正常完成、登录失败或按 Ctrl-C 时，会关闭子进程并清理临时配置。保存在项目 output 中的是预检报告。之后的独立运行不会继承本次临时登录。
-
-## 临时登录后只试第一张
-
-在工作树根目录执行 `node experiments/codex-imagegen/run.cjs --login-first-image`。这条命令先校验第 1 张原画，再让你在官方页面登录。预检就绪后，它在同一次登录中自动提交第 1 张原画一次，可能占用 ChatGPT 额度。你无需选择或上传文件。终端显示“首图已生成”后，可打开同一行给出的 `comparison.html` 查看原画、FLUX G3 与 Codex 结果。临时登录在结束时清理。重新执行命令会发起新的测试。
-
-## 运行
-
-在这个分支的工作树根目录运行。需要 Node.js 22+、macOS 原生 Codex CLI；图片解码和进程隔离使用系统自带的 sips 与 sandbox-exec，无需安装 npm 包。终端里的官方 CLI 自行管理登录。实验客户端禁止读取、复制或记录用户凭据，禁止打开 ~/.codex/ 下的文件或设置 ACCESS_TOKEN。若 PATH 首个 CLI 指向该目录，实验会停止。在这台 Mac 上可在当前终端选择应用包的独立 CLI，然后执行预检。
+在这个分支的工作树根目录，用日常登录 Codex 的 macOS 用户打开终端。需要 Node.js 22+，图片解码和进程隔离使用系统的 sips 和 sandbox-exec。运行下面一条命令即可，无需手动上传或选择图片。
 
 ```sh
-export PATH="/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS:$PATH"
-node experiments/codex-imagegen/run.cjs --dry-run
+PATH="$HOME/.local/bin:$PATH" node experiments/codex-imagegen/run.cjs --limit 1
 ```
 
-无参数等同于 `--dry-run`。看终端打印的报告目录，打开 `results.json`。自动扫描只需要一次预检。检查 `preflight.handshake` 和 `ready`，并查看 `issues`。ready 要求账号类型为 chatgpt、image_generation 开启、供应商能力接口明确支持出图、有支持图片输入的模型，且已知账号额度许可未明确拒绝。限额读数缺失会单列原因。dry-run 的退出码 0 表示握手完成，离线模型目录或未登录状态也可能握手成功。
+启动器固定使用同一份 Codex 可执行文件，交由 macOS 核验 OpenAI 签名。对于用户的独立安装，它只沿公开快捷方式查找安装包内的程序。实验客户端禁止读取 ~/.codex/ 下的登录文件或处理令牌。官方 CLI 自行使用原有登录配置。
 
-预检就绪后，以下命令只提交第一张，可能占用该 ChatGPT 账号的额度。
+第一次连接确认账号类型后，脚本关闭该子进程，再按相同设置启动和检查第二次。两次都返回 `chatgpt`，图片生成功能、供应商能力和模型输入满足要求，且账号未明确拒绝额度，才自动提交第 1 张一次，可能使用账号额度。无法确认登录或出图条件时自动停止，不发起登录。终端打印的报告目录包含 `results.json` 和三列对比页 `comparison.html`。
 
-```sh
-node experiments/codex-imagegen/run.cjs --limit 1
-```
+仅希望检查连接时运行 `node experiments/codex-imagegen/run.cjs --dry-run`，提交 0 张。无参数行为相同。查看 `existingLogin.first`、`existingLogin.reconnect`、`existingLogin.verified` 和 `preflight.ready`。预检全部通过时退出码为 0。
 
-用户决定测完整组时可用 `node experiments/codex-imagegen/run.cjs --all` 串行提交五张。每次调用建立独立报告目录，整组执行会重新提交第一张。本次开发期间这两条生成命令均执行了 0 次。
-
-实验从 `output/scenes-g3-20261025-060950/` 读取 prompt.txt、metrics.json 和 5 张 FLUX PNG。Git 链接工作树会自动查找主工作树的此目录，也可设置 `PRINT_CHAMBER_G3_DIR` 指向完整的 G3 数据目录。metrics 中原画的绝对路径必须在本机可读。校验 G3 指纹和每张原画的 SHA-256 后，才会提交相应原画。哈希不符的原画记作跳过。
+脚本在工作树或主工作树的 `output/scenes-g3-20261025-060950/` 查找 G3 提示词和素材清单。单图模式仅校验及复制第 1 张原画和对应的 `1-G3.png`。重跑单图命令可能再次提交，本阶段首次失败后停止。
 
 ## 协议与计量
 
-已用安装在应用包内的 0.171.0-alpha.13 执行 `codex app-server generate-json-schema --out <临时目录>`，按生成的本机 schema 编写。任务单中记录的 0.156.1 可执行文件位于受保护安装目录，未验证该版本的协议兼容性。
+已核对日常独立安装版 0.156.1 的 OpenAI 签名，并用该程序生成本机协议定义。稳定接口声明了账号查询、供应商图片能力、附图输入和图片工具完成事件。这个版本的图片事件有 `result` 和 `savedPath`，没有参考图哈希字段。获得图片后需要在对比页核对主体与构图。账号及供应商当下是否可用仍以实际连接为准。
 
 1. 在每次运行新建的空工作目录中用 stdio 启动 `codex app-server`。发送 `initialize` 和 `initialized`，查询 `account/read`、`experimentalFeature/list`、`modelProvider/capabilities/read`、`model/list`、`account/rateLimits/read`。客户端不请求刷新凭据，只保留账号类型及相关额度窗口。
 2. 每张原画新建一个临时 `thread/start`，指定 OpenAI 供应商、只读策略、禁审批，并检查服务端回显。模型工具关闭 shell、MCP、应用、插件、hooks、网页搜索等。真正提交前，macOS 还会限制整个 app-server 的文件写入和子进程。它仅可写本次临时目录，网络仍供官方模型服务使用。系统隔离未能启用时终止。报告由父进程直接写入本工作树。
@@ -49,6 +34,10 @@ node experiments/codex-imagegen/run.cjs --limit 1
 终端打印的 `output/codex-imagegen-<时间戳>-<后缀>/` 已被 Git 忽略。打开 `comparison.html` 查看“原画 / 本地 FLUX G3 / Codex”和每张耗时、状态。图片以相对路径引用，整个目录可以一起移动。打开 `results.json` 查看协议观察、错误和 `findings` 中的七项结论。一次单图运行只能给出该次样本的数据；五张全部实际提交后才计算整组产图率。
 
 ## 验证记录
+
+2026-11-21，日常 0.156.1 的第 1 张素材 SHA-256 与清单一致。开发环境在启动 Codex 服务前拒绝叠加 macOS 写入限制。因此这次两次账号检查均未执行，首图提交 0 次，产图 0 张；日常登录和首图仍待普通终端验证。
+
+历史临时登录命令 `--login-check`、`--login-first-image` 会使用独立的临时登录配置，不用于本阶段。
 
 2026-11-21，用户使用临时 ChatGPT 登录实测了第 1 张原画。此次提交 1 张，产图 0 张，另外 4 张未提交。会话在 17.814 秒后以 completed 结束，未观测到 imageGeneration 工具事件或输出文件；模型文字回复称图片工具暂不可用。该时长是收到文字回复的耗时。同一账号额度窗口的整数百分点读数没有变化，无法据此计算此次消耗。旧预检未查询供应商侧的图片生成能力，当次结果无法补推。现在会在提交前核对该能力；确认实际使用图片工具仍需工具事件。重复登录来自本实验清理临时配置的设计。
 

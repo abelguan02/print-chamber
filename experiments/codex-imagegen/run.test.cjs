@@ -89,6 +89,8 @@ async function turnFixture(t, handler, timeoutMs) {
   return { record, calls, outputDir, promise };
 }
 
+const tinyPng = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAIAAADwyuo0AAAACXBIWXMAAAABAAAAAQBPJcTWAAAAEklEQVR4nGNkYPjLAAMsDEgAABcjAQPGhqsAAAAAAElFTkSuQmCC';
+
 test('a reference, an image event, real pixels and a matching turn produce a portable report', {
   skip: process.platform !== 'darwin',
 }, async t => {
@@ -99,7 +101,7 @@ test('a reference, an image event, real pixels and a matching turn produce a por
     const notifyItem = item => notify('item/completed', { threadId: 'T', turnId: 'U', item });
     notifyItem({ type: 'agentMessage', text: '图'.repeat(600) });
     notifyItem({ type: 'imageGeneration', status: 'completed', inputImages: [{ sha256: 'b'.repeat(64) }],
-      result: 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAIAAADwyuo0AAAACXBIWXMAAAABAAAAAQBPJcTWAAAAEklEQVR4nGNkYPjLAAMsDEgAABcjAQPGhqsAAAAAAElFTkSuQmCC' });
+      result: tinyPng });
     notify('turn/completed', { threadId: 'T', turn: { id: 'U', status: 'completed' } });
     return { turn: { id: 'U' } };
   });
@@ -114,6 +116,21 @@ test('a reference, an image event, real pixels and a matching turn produce a por
   assert.equal(results.findings.length, 7);
   assert.equal(results.findings[1].produced, 1);
   assert.match(await fs.readFile(path.join(outputDir, 'comparison.html'), 'utf8'), /1-codex\.png/);
+});
+
+test('a generated image with a different input hash fails the source check', {
+  skip: process.platform !== 'darwin',
+}, async t => {
+  const { record, promise } = await turnFixture(t, (_method, _params, notify) => {
+    notify('item/completed', { threadId: 'T', turnId: 'U', item: {
+      type: 'imageGeneration', status: 'completed', inputImages: [{ sha256: 'c'.repeat(64) }], result: tinyPng,
+    } });
+    notify('turn/completed', { threadId: 'T', turn: { id: 'U', status: 'completed' } });
+    return { turn: { id: 'U' } };
+  });
+  await assert.rejects(promise, /输入与第 1 张原画不符/);
+  assert.equal(record.referenceHashMatched, false);
+  assert.equal(record.outputImage, '1-codex.png');
 });
 
 test('text-only completion never counts an image; foreign notifications are ignored', async t => {
@@ -168,4 +185,81 @@ test('the default dry run stops before handshake when the generation launcher is
   assert.equal(report.preflight.handshake, false);
   assert.ok(!report.serverPid);
   assert.deepEqual(report.records, []);
+});
+
+test('daily sessions reconnect to the same profile and stop immediately if either connection lacks a login', async t => {
+  for (const accounts of [['chatgpt', 'chatgpt'], ['chatgpt', null], [null]]) {
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pc-session-reuse-')));
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const dir = path.join(root, 'experiments', 'codex-imagegen');
+    await fs.mkdir(dir, { recursive: true });
+    await fs.copyFile(path.join(__dirname, 'run.cjs'), path.join(dir, 'run.cjs'));
+    for (const file of ['image.cjs', 'client.cjs', 'report.cjs', 'login-check.cjs']) {
+      await fs.symlink(path.join(__dirname, file), path.join(dir, file));
+    }
+    const cli = path.join(root, 'codex');
+    const trace = path.join(root, 'methods');
+    await fs.writeFile(trace, '');
+    await fs.writeFile(cli, '#!' + process.execPath + '\n' + `
+      const fs = require('node:fs');
+      const file = ${JSON.stringify(trace)};
+      const log = entry => fs.appendFileSync(file, JSON.stringify(entry) + '\\n');
+      const command = process.argv[2];
+      if (command === '--version') console.log('fixture CLI');
+      else if (command === 'app-server') {
+        const previous = fs.readFileSync(file, 'utf8').trim().split('\\n').filter(Boolean).map(JSON.parse);
+        const type = ${JSON.stringify(accounts)}[previous.filter(r => r.method === 'start').length];
+        const methods = {
+          initialize: {}, 'account/read': {account: type ? {type, email:'unused@example.invalid'} : null},
+          'experimentalFeature/list': {data:[{name:'image_generation',enabled:true}]},
+          'modelProvider/capabilities/read': {imageGeneration:true},
+          'model/list': {data:[{model:'fixture', inputModalities:['image']}]}, 'account/rateLimits/read': {},
+        };
+        log({method:'start', profile:process.env.CODEX_HOME, cwd:process.cwd(), args:process.argv.slice(2)});
+        process.on('exit', () => log({method:'end'}));
+        require('node:readline').createInterface({input:process.stdin}).on('line', line => {
+          const {id, method, params} = JSON.parse(line);
+          log({method});
+          if (method === 'initialized') return;
+          if (!Object.hasOwn(methods, method)) process.exit(8);
+          if (method === 'account/read' && Object.keys(params).length) process.exit(9);
+          console.log(JSON.stringify({id, result:methods[method]}));
+        });
+      } else process.exit(7);
+    `, { mode: 0o700 });
+    await fs.writeFile(path.join(dir, 'isolation.cjs'), `
+      exports.cliOnPath = async () => ${JSON.stringify(cli)};
+      exports.isolateGeneration = async (_root, env, cli) => {
+        if (cli !== ${JSON.stringify(cli)}) throw new Error('unexpected executable');
+        return env;
+      };
+    `);
+    const profile = path.join(root, 'existing-user');
+    const result = require('node:child_process').spawnSync(process.execPath, [path.join(dir, 'run.cjs')], {
+      cwd: root, encoding: 'utf8', timeout: 8000,
+      env: { PATH: root, HOME: root, CODEX_HOME: profile, TMPDIR: root, PRINT_CHAMBER_G3_DIR: root },
+    });
+    const verified = accounts.length === 2 && accounts[1] === 'chatgpt';
+    assert.equal(result.status, verified ? 0 : 1, result.stderr);
+    const [reportDir] = await fs.readdir(path.join(root, 'output'));
+    const report = JSON.parse(await fs.readFile(path.join(root, 'output', reportDir, 'results.json')));
+    assert.equal(report.existingLogin.verified, verified);
+    assert.equal(report.preflight.ready, verified);
+    assert.equal(report.existingLogin.first.accountType, accounts[0] ?? 'signed-out');
+    assert.equal(report.existingLogin.reconnect.accountType, accounts.length === 2 ? accounts[1] ?? 'signed-out' : null);
+    const entries = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
+    const starts = entries.filter(e => e.method === 'start');
+    assert.equal(starts.length, accounts.length);
+    assert.equal(starts[0].profile, profile);
+    if (accounts.length === 2) assert.deepEqual(starts[0], starts[1]);
+    const methods = entries.map(e => e.method);
+    const handshake = ['start', 'initialize', 'initialized', 'account/read'];
+    const expected = [...handshake, 'end'];
+    if (accounts.length === 2) expected.push(...handshake);
+    if (verified) expected.push('experimentalFeature/list', 'modelProvider/capabilities/read', 'model/list', 'account/rateLimits/read');
+    if (accounts.length === 2) expected.push('end');
+    assert.deepEqual(methods, expected);
+    assert.deepEqual(report.records, []);
+    assert.ok(!JSON.stringify(report).includes('unused@example.invalid'));
+  }
 });

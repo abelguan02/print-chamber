@@ -104,17 +104,31 @@ async function handshake(client) {
   client.notify('initialized');
 }
 
-async function preflight(client, checks, failureModes) {
+async function confirmChatgpt(client, checks, failureModes) {
   await handshake(client);
   checks.handshake = true;
-  // Independent probe failures are useful evidence on offline and signed-out machines.
+  let response;
+  try { response = await client.request('account/read', {}); }
+  catch (error) { throw new Error('无法确认已有登录，已停止（' + error.message + '）。'); }
+  const account = response?.account;
+  checks.accountType = account === null ? 'signed-out' :
+    (['chatgpt', 'apiKey'].includes(account?.type) ? account.type : 'unknown');
+  if (checks.accountType === 'signed-out') {
+    failureModes.loggedOut = 'account/read 返回 account=null，未提交原画。';
+    throw new Error('本次连接未识别到已有登录，已停止。');
+  }
+  if (checks.accountType !== 'chatgpt') throw new Error('无法确认已有 ChatGPT 登录，已停止。');
+}
+
+async function preflight(client, checks, failureModes) {
+  await confirmChatgpt(client, checks, failureModes);
   const probes = {
-    accountType: async () => (await client.request('account/read', {})).account?.type ?? 'signed-out',
     imageGeneration: async () => (await pages(client, 'experimentalFeature/list',
       f => ({ name: f.name, enabled: f.enabled }))).find(f => f.name === 'image_generation')?.enabled ?? null,
     providerImageGeneration: async () => (await client.request('modelProvider/capabilities/read', {})).imageGeneration,
+    // The CLI schema defaults an omitted inputModalities to ["text", "image"].
     models: () => pages(client, 'model/list', m => ({
-      model: m.model, imageInput: m.inputModalities?.includes('image') ?? true, isDefault: m.isDefault,
+      model: m.model, imageInput: m.inputModalities === undefined || m.inputModalities?.includes('image') === true, isDefault: m.isDefault,
     })),
     rateLimits: () => readLimits(client),
   };
@@ -122,14 +136,14 @@ async function preflight(client, checks, failureModes) {
     try { checks[name] = await run(); }
     catch (error) { checks.issues[name] = error.message; }
   }));
-  if (checks.accountType === 'signed-out') {
-    failureModes.loggedOut = 'account/read 成功返回 account=null。' +
-      (checks.issues.rateLimits ? ' 读取限额时 ' + checks.issues.rateLimits + '。' : '') + ' 未发送生成请求。';
-  }
   if (checks.imageGeneration === false) failureModes.featureDisabled = '功能查询返回 enabled=false；预检终止，未发送生成请求。';
   const models = (checks.models ?? []).filter(m => m.imageInput);
   checks.model = (models.find(m => m.isDefault) ?? models[0])?.model ?? null;
   if (checks.providerImageGeneration === false) checks.issues.providerImageGeneration = '供应商报告不支持图片生成。';
+  if (!checks.model) checks.issues.models ??= '未找到支持图片输入的模型。';
+  if (checks.imageGeneration !== true) checks.issues.imageGeneration ??= '未确认图片生成功能已开启。';
+  if (checks.providerImageGeneration !== true) checks.issues.providerImageGeneration ??= '未确认供应商支持图片生成。';
+  if (checks.rateLimits?.ordinaryUsageAllowed === false) checks.issues.quota = '账号报告当前额度受限。';
   checks.ready = checks.rateLimits?.ordinaryUsageAllowed !== false && checks.accountType === 'chatgpt' &&
     checks.imageGeneration === true && checks.providerImageGeneration === true && !!checks.model;
 }
@@ -218,6 +232,7 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
       (record.turnErrorCode ? ' (' + record.turnErrorCode + ')' : ''));
     if (!record.imageToolCalled) throw new Error('本次会话未观测到图片生成工具调用，未收到有效输出');
     if (!record.outputImage) throw new Error(record.error || '已观测到图片工具调用，但未收到有效输出');
+    if (record.referenceHashMatched === false) throw new Error(`已取得图片，但图片工具记录的输入与第 ${source.id} 张原画不符。`);
     record.status = 'success';
   } finally {
     clearTimeout(timer);
@@ -258,7 +273,10 @@ async function run(mode) {
     },
     preflight: { handshake: false, ready: false, issues: {} }, failureModes: {}, records: [],
   };
-  let client, listener, tempRoot, dataset, datasetDir;
+  if (!temporaryLogin) results.existingLogin = {
+    first: { handshake: false, accountType: null }, reconnect: { handshake: false, accountType: null }, verified: false,
+  };
+  let client, listener, tempRoot, dataset, datasetDir, activeCheck;
   const cancellation = new AbortController();
   const cancel = () => {
     cancellation.abort(new Error('已取消本次运行。'));
@@ -285,7 +303,7 @@ async function run(mode) {
       try { Object.assign(record, await prepareSample(datasetDir, source, outputDir)); }
       catch (error) {
         record.error = error.message;
-        if (firstImage) throw error;
+        if (mode.count === 1) throw error;
       }
     }
     tempRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pc-imagegen-')));
@@ -295,11 +313,10 @@ async function run(mode) {
       ? await temporaryLoginEnvironment(tempRoot, process.env)
       : childEnvironment(tempRoot);
     const cliPath = await cliOnPath(baseEnv.PATH, cwd);
-    results.environment.codexVersion = execFileSync(cliPath, ['--version'], {
-      cwd, env: baseEnv, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'],
+    const env = await isolateGeneration(tempRoot, baseEnv, cliPath);
+    results.environment.codexVersion = execFileSync('codex', ['--version'], {
+      cwd, env, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    // A ready dry run must prove that the *same* confined server can start.
-    const env = await isolateGeneration(tempRoot, baseEnv);
     const startServer = () => new AppServerClient({
       cwd, env, args: SERVER_ARGS, onNotification: (method, params) => listener?.(method, params),
     });
@@ -314,8 +331,15 @@ async function run(mode) {
       console.log('启动检查通过。请在官方登录页面选择你的 ChatGPT 账号，完成后回到本终端。');
       await loginInTerminal(cliPath, cwd, baseEnv, cancellation.signal);
       results.loginCheck.loginCompleted = true;
+    } else {
+      activeCheck = results.existingLogin.first;
+      client = startServer();
+      await confirmChatgpt(client, activeCheck, results.failureModes);
+      await client.close();
+      client = null;
     }
     cancellation.signal.throwIfAborted();
+    activeCheck = results.preflight;
     client = startServer();
     results.serverPid = client.pid;
     await preflight(client, results.preflight, results.failureModes);
@@ -335,7 +359,8 @@ async function run(mode) {
         record.error = '提交前账号已拒绝额度，未出图。';
         continue;
       }
-      if (firstImage) console.log('登录预检通过，正在处理第 1 张原画。');
+      cancellation.signal.throwIfAborted();
+      if (mode.count === 1) console.log((firstImage ? '登录预检通过' : '两次连接均识别到已有 ChatGPT 登录') + '，正在处理第 1 张原画。');
       try {
         await runTurn({ client, listen, record, source, prompt: dataset.g3,
           model: results.preflight.model, tempRoot, cwd, outputDir,
@@ -353,7 +378,7 @@ async function run(mode) {
       if (record.rateLimitsAfter?.ordinaryUsageAllowed === false) quotaBlocked = true;
     }
   } catch (error) {
-    if (!results.preflight.handshake && error.code === 'APP_SERVER_EXITED') {
+    if (!activeCheck?.handshake && error.code === 'APP_SERVER_EXITED') {
       results.preflight.issues.startup = error.message;
       results.error = 'Codex 在出图隔离条件下未完成握手就退出了（' + error.message + '）。未提交图片。';
     } else {
@@ -365,6 +390,11 @@ async function run(mode) {
       if (client) await client.close();
       if (tempRoot) await fs.rm(tempRoot, { recursive: true, force: true });
     } finally {
+      if (results.existingLogin) {
+        const { handshake, accountType } = results.preflight;
+        results.existingLogin.reconnect = { handshake, accountType: accountType ?? null };
+        results.existingLogin.verified = results.existingLogin.first.accountType === 'chatgpt' && accountType === 'chatgpt';
+      }
       process.off('SIGINT', cancel);
       process.off('SIGTERM', cancel);
       await writeReport(outputDir, results);
@@ -377,14 +407,23 @@ async function run(mode) {
     console.log((ok ? '临时登录预检通过' : '临时登录预检未通过') + '，已提交 0 张。');
     return ok;
   }
-  console.log('握手 ' + (results.preflight.handshake ? '完成' : '失败') + '，生成预检 ' +
+  if (results.existingLogin) {
+    const { first, reconnect } = results.existingLogin;
+    console.log('已有登录：首次 ' + (first.accountType ?? '未确认') + '，重连 ' + (reconnect.accountType ?? '未确认') + '。');
+  }
+  const handshakeStatus = results.preflight.handshake ? '完成' : activeCheck ? '未完成' : '未开始';
+  console.log('握手 ' + handshakeStatus + '，生成预检 ' +
     (results.preflight.ready ? '就绪' : '未就绪') + '，已提交 ' + results.records.filter(r => r.attempted).length + ' 张');
-  if (firstImage) {
+  if (!results.error && !results.preflight.ready) console.error(Object.values(results.preflight.issues).join(' '));
+  if (mode.count === 1) {
     const record = results.records[0];
-    if (record?.status === 'success') console.log('首图已生成。对比页 ' + path.join(outputDir, 'comparison.html'));
+    if (record?.status === 'success') {
+      console.log('首图已生成。对比页 ' + path.join(outputDir, 'comparison.html'));
+      if (record.referenceHashMatched === null) console.log('此版本未返回参考图指纹，请在对比页核对原画的主体和构图。');
+    } else if (record?.outputImage) console.error(record.error);
     else if (record?.error && !results.error) console.error('首图未生成。' + record.error);
   }
-  return !cancellation.signal.aborted && !results.error && results.preflight.handshake &&
+  return !cancellation.signal.aborted && !results.error && results.preflight.ready &&
     (!mode.count || results.records.every(r => r.status === 'success'));
 }
 

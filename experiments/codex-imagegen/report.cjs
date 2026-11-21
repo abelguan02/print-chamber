@@ -84,14 +84,27 @@ function collectFindings(results) {
   const coveredAll = attempted.length === TOTAL_SAMPLES;
   const skipped = records.filter(r => !r.attempted && r.status === 'skipped').length;
   const produced = attempted.filter(r => r.imageToolCalled && r.outputImage);
+  const first = attempted.find(r => r.id === 1);
+  const firstProduced = produced.some(r => r.id === 1);
+  const untested = Array.from({ length: TOTAL_SAMPLES }, (_, i) => i + 1)
+    .filter(id => !attempted.some(r => r.id === id));
   const referenceMatches = produced.filter(r => r.referenceHashMatched === true);
-  const times = produced.filter(r => Number.isFinite(r.durationMs)).map(r => r.durationMs).sort((a, b) => a - b);
+  const unmatched = produced.filter(r => r.referenceHashMatched === false).map(r => r.id);
+  const times = produced.filter(r => r.status === 'success' && Number.isFinite(r.durationMs))
+    .map(r => r.durationMs).sort((a, b) => a - b);
   const mid = Math.floor(times.length / 2);
   const medianMs = times.length ? (times[mid] + times[Math.floor((times.length - 1) / 2)]) / 2 : null;
   const maxMs = times.at(-1) ?? null;
+  const failures = attempted.filter(r => r.status === 'failed').map(r => ({
+    sample: r.id, durationMs: r.durationMs ?? null, turnStatus: r.turnStatus ?? null,
+  }));
+  const firstTerminalMs = first?.turnStatus ? first.durationMs ?? null : null;
+  const firstTime = first?.status === 'failed' && Number.isFinite(firstTerminalMs) ? '' :
+    Number.isFinite(firstTerminalMs) ? `首图从提交到终态用时 ${firstTerminalMs / 1000} 秒。` :
+    first ? '首图提交至终态的耗时未能测得。' : '首图未提交，无生成耗时。';
   const usage = attempted.map(usageChanges);
   const changes = usage.flatMap(r => r.changes.filter(c => c.changeInPercentagePoints !== null)
-    .map(c => `样本 ${r.sample} ${c.id}/${c.window} +${c.changeInPercentagePoints} 个百分点`));
+    .map(c => `样本 ${r.sample} ${c.id}/${c.window} 从 ${c.beforePercent}% 到 ${c.afterPercent}%（+${c.changeInPercentagePoints} 个百分点）`));
   const images = produced.map(r => ({
     sample: r.id, file: r.outputImage, format: r.format, width: r.width, height: r.height,
     reportedPath: r.reportedPath ?? null, reportedPathScope: r.reportedPathScope ?? null,
@@ -101,27 +114,35 @@ function collectFindings(results) {
     {
       question: '能否附带原画生成图片？',
       answer: referenceMatches.length ? `已验证图生图。${referenceMatches.length} 张生成结果的图片工具事件记录了与附带原画一致的输入 SHA-256。视觉还原程度请看对比页。` :
+        unmatched.length ? `样本 ${unmatched.join('、')} 已取得图片，但工具的输入清单未匹配原画哈希，未通过重绘验收。` :
         produced.length ? '附图请求触发图片工具并取得图片，尚无匹配的输入哈希确认工具采用原画，构图和细节待人工对比。' :
           '未取得携带原画且实际调用图片工具产出图片的证据，图生图能力待验证。',
       matchedSamples: referenceMatches.map(r => r.id),
     },
     {
-      question: '五张中实际调用图片工具并产图的比例？',
-      answer: coveredAll ? `整组产图 ${produced.length}/5（${produced.length * 20}%），实际尝试 ${attempted.length} 张。` :
-        `共 5 张，已尝试 ${attempted.length} 张，确认产图 ${produced.length} 张，本次跳过 ${skipped} 张。全组成功率待测。`,
+      question: '首图提交几次、产图几张？其余样本和整组成功率如何？',
+      answer: `首图提交 ${first ? 1 : 0} 次，产图 ${firstProduced ? 1 : 0} 张。` +
+        (coveredAll ? `整组产图 ${produced.length}/5（${produced.length * 20}%）。` :
+          `样本 ${untested.join('、')} 未测。全组成功率未验证。`),
       total: TOTAL_SAMPLES, attempted: attempted.length, produced: produced.length, skipped,
+      untested,
       measuredRate: attempted.length ? produced.length / attempted.length : null,
       fullSetRate: coveredAll ? produced.length / TOTAL_SAMPLES : null,
     },
     {
-      question: '单张耗时中位数与最大值？',
-      answer: times.length ? `已产图的 ${times.length} 张中，中位数 ${medianMs / 1000} 秒，最大值 ${maxMs / 1000} 秒。` :
-        '暂无已产出图片的耗时样本。',
-      count: times.length, medianMs, maxMs,
+      question: '首图提交至终态多久？成功与失败样本各耗时多少？',
+      answer: firstTime + (times.length ? `成功样本 ${times.length} 张，中位数 ${medianMs / 1000} 秒，最大值 ${maxMs / 1000} 秒。` :
+        '成功样本 0 张，无中位数或最大值。') + failures.map(f => {
+          const end = f.turnStatus ? '至终态' : '至停止等待';
+          const sample = f.sample === 1 ? '首图失败' : `样本 ${f.sample} 失败`;
+          return `${sample}，从提交${end}耗时${Number.isFinite(f.durationMs) ? ' ' + f.durationMs / 1000 + ' 秒' : '未测得'}。`;
+        }).join(''),
+      firstTerminalMs, count: times.length, medianMs, maxMs, failures,
     },
     {
       question: '能否观察每张图片的额度消耗？',
-      answer: changes.length ? `${changes.join('，')}。变化是账号窗口的整数读数，可能受延迟或同时使用影响，不能单独归因于这次出图。` :
+      answer: !attempted.length ? '本次未提交原画，没有首图提交前后的额度读数。' :
+        changes.length ? `${changes.join('，')}。变化是账号窗口的整数读数，可能受延迟或同时使用影响，不能单独归因于这次出图。` :
         '缺少可比较的同一额度窗口前后读数，每张图片的消耗未知。',
       perSample: usage,
     },
@@ -142,7 +163,7 @@ function collectFindings(results) {
     },
     {
       question: '本机最小可用性检测步骤？',
-      answer: '运行一次 node experiments/codex-imagegen/run.cjs --dry-run，在 results.json 查看 preflight.handshake 与 preflight.ready 是否均为 true，并核对 ChatGPT 登录、image_generation 已开启、供应商声明支持图片生成、存在支持图片输入的模型及限额检查情况。限额读数缺失时，实际可用额度未知。遇到问题可用 codex --version、codex login status 和 codex features list 单独诊断。端到端验证需要一次真实附图请求、图片工具事件和可解码的产物，确认工具读入原画还需核对输入哈希。',
+      answer: '运行 node experiments/codex-imagegen/run.cjs --dry-run，使用日常 Codex 和已有配置完成握手、查询 account/read，关闭后按相同设置重新连接。两次都返回 chatgpt 才确认复用了现有登录，此时 existingLogin.verified 为 true。再检查 image_generation 已启用、供应商明确支持出图、模型明确支持图片输入和账号额度未明确拒绝。preflight.ready 为 true 时才可尝试首图。额度读数缺失时，实际可用额度未知。实际出图需另有图片工具的完成事件及可解码图片。工具提供输入哈希时须与原画匹配，缺少哈希时需人工对比主体和构图。',
     },
   ];
   return questions.map((finding, i) => ({ number: i + 1, ...finding }));
@@ -159,12 +180,22 @@ function imageCell(file, label) {
   return `<td><a href="${encodeURIComponent(file)}"><img src="${encodeURIComponent(file)}" alt="${escapeHtml(label)}"></a></td>`;
 }
 
+function outcome(record) {
+  if (!record.attempted) return '未提交';
+  if (!record.imageToolCalled) return '已提交，未观测到图片工具调用';
+  if (!record.outputImage) return '工具已调用，未取得有效图片';
+  return record.id === 1 ? '已取得首图' : '已取得图片';
+}
+
 async function writeReport(outputDir, results) {
   results.findings = collectFindings(results);
   const rows = results.records.map(r => {
+    r.outcome = outcome(r);
     const seconds = Number.isFinite(r.durationMs) ? `${(r.durationMs / 1000).toFixed(2)} 秒` : '无耗时记录';
+    const reference = r.outputImage ? (r.referenceHashMatched === true ? ' · 原画输入哈希匹配' :
+      r.referenceHashMatched === false ? ' · 原画输入哈希未匹配' : ' · 请人工核对原画主体和构图') : '';
     return `<tbody><tr>${imageCell(r.sourceImage, '原画')}${imageCell(r.fluxImage, '本地 FLUX G3')}${imageCell(r.outputImage, 'Codex')}</tr>
-<tr><th colspan="3" scope="rowgroup">样本 ${escapeHtml(r.id)} · ${escapeHtml(r.status)} · ${seconds}${r.error ? ' · ' + escapeHtml(r.error) : ''}</th></tr></tbody>`;
+<tr><th colspan="3" scope="rowgroup">样本 ${escapeHtml(r.id)} · ${r.outcome}${reference} · ${seconds}${r.error ? ' · ' + escapeHtml(r.error) : ''}</th></tr></tbody>`;
   }).join('\n');
   const html = `<!doctype html>
 <html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -174,7 +205,7 @@ table{width:100%;border-collapse:collapse;table-layout:fixed}th,td{padding:.55re
 tbody th{border-bottom:1px solid #aaa;font-weight:normal}td img{display:block;width:100%;max-height:65vh;object-fit:contain}
 </style><h1>G3 原画重绘对比</h1>
 <table><thead><tr><th scope="col">原画</th><th scope="col">本地 FLUX G3</th><th scope="col">Codex</th></tr></thead>${rows}</table>
-${rows ? '' : '<p>本次没有样本记录。</p>'}<p><a href="results.json">查看运行记录与七项结论</a></p></html>\n`;
+${rows ? '' : '<p>本次未提交原画。</p>'}${results.error ? '<p>' + escapeHtml(results.error) + '</p>' : ''}<p><a href="results.json">查看运行记录与七项结论</a></p></html>\n`;
   await Promise.all([
     fs.writeFile(path.join(outputDir, 'results.json'), JSON.stringify(results, null, 2) + '\n'),
     fs.writeFile(path.join(outputDir, 'comparison.html'), html),
