@@ -4,11 +4,9 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-const bundledCliDir = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS';
-
 async function temporaryLoginEnvironment(tempRoot, baseEnv) {
   const env = {
-    PATH: [bundledCliDir, '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(path.delimiter),
+    PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
     HOME: path.join(tempRoot, 'home'),
     CODEX_HOME: path.join(tempRoot, 'profile'),
     TMPDIR: path.join(tempRoot, 'tmp'),

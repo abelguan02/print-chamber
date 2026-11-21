@@ -24,13 +24,12 @@ async function fakeCli(root, source) {
 
 test('the login and preflight share a new private file-based ChatGPT profile', async t => {
   const root = await tempDir(t);
-  const base = { PATH: '/usr/bin:/bin', HOME: '/unused-home', CODEX_HOME: '/unused-profile' };
+  const base = { PATH: '/unused-cli', HOME: '/unused-home', CODEX_HOME: '/unused-profile' };
   const env = await temporaryLoginEnvironment(root, base);
   assert.equal(env.HOME, path.join(root, 'home'));
   assert.equal(env.CODEX_HOME, path.join(root, 'profile'));
   assert.equal(env.TMPDIR, path.join(root, 'tmp'));
-  assert.equal(env.PATH.split(path.delimiter)[0],
-    '/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS');
+  assert.equal(env.PATH, '/usr/bin:/bin:/usr/sbin:/sbin');
   assert.equal(base.CODEX_HOME, '/unused-profile');
   for (const dir of [env.HOME, env.CODEX_HOME, env.TMPDIR]) {
     assert.equal((await fs.stat(dir)).isDirectory(), true);
@@ -161,8 +160,8 @@ async function runLoginMode(t, mode) {
     } else process.exit(8);
   `);
   await fs.symlink(cli, path.join(root, 'codex'));
+  await fs.writeFile(path.join(dir, 'desktop-cli.cjs'), `exports.findDesktopCli = async () => ${JSON.stringify(cli)};`);
   await fs.writeFile(path.join(dir, 'isolation.cjs'), `
-    exports.cliOnPath = async () => ${JSON.stringify(cli)};
     exports.isolateGeneration = async (_root, env) => ({...env, PATH: ${JSON.stringify(root)}});
   `);
   const tty = path.join(root, 'fixture-tty.cjs');
@@ -181,6 +180,8 @@ async function runLoginMode(t, mode) {
   const [reportDir] = await fs.readdir(path.join(root, 'output'));
   const report = JSON.parse(await fs.readFile(path.join(root, 'output', reportDir, 'results.json'), 'utf8'));
   assert.deepEqual(report.loginCheck, { startupVerified: true, loginCompleted: true });
+  assert.equal(report.environment.codexSource, 'chatgpt-desktop-bundle');
+  assert.equal(report.environment.codexExecutable, cli);
   assert.equal(report.preflight.ready, true);
   return { methods, report, outputDir: path.join(root, 'output', reportDir) };
 }

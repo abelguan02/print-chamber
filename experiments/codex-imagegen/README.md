@@ -7,10 +7,10 @@
 在这个分支的工作树根目录，用日常登录 Codex 的 macOS 用户打开终端。需要 Node.js 22+，图片解码和进程隔离使用系统的 sips 和 sandbox-exec。运行下面一条命令即可，无需手动上传或选择图片。
 
 ```sh
-PATH="$HOME/.local/bin:$PATH" node experiments/codex-imagegen/run.cjs --limit 1
+node experiments/codex-imagegen/run.cjs --limit 1
 ```
 
-启动器固定使用同一份 Codex 可执行文件，交由 macOS 核验 OpenAI 签名。对于用户的独立安装，它只沿公开快捷方式查找安装包内的程序。实验客户端禁止读取 ~/.codex/ 下的登录文件或处理令牌。官方 CLI 自行使用原有登录配置。
+启动器从已安装的 ChatGPT 桌面应用中定位随附的 Codex，向 macOS 核验它的 OpenAI 签名，并在两次连接和出图中使用同一个可执行文件。若未找到或无法确认签名就停止，不回退到终端中的独立安装版。报告的 `environment.codexSource` 和 `environment.codexExecutable` 指明来源和位置。实验客户端禁止读取 ~/.codex/ 下的登录文件或处理令牌。官方 Codex 自行使用原有登录配置。
 
 第一次连接确认账号类型后，脚本关闭该子进程，再按相同设置启动和检查第二次。两次都返回 `chatgpt`，图片生成功能、供应商能力和模型输入满足要求，且账号未明确拒绝额度，才自动提交第 1 张一次，可能使用账号额度。无法确认登录或出图条件时自动停止，不发起登录。终端打印的报告目录包含 `results.json` 和三列对比页 `comparison.html`。
 
@@ -20,7 +20,7 @@ PATH="$HOME/.local/bin:$PATH" node experiments/codex-imagegen/run.cjs --limit 1
 
 ## 协议与计量
 
-已核对日常独立安装版 0.156.1 的 OpenAI 签名，并用该程序生成本机协议定义。稳定接口声明了账号查询、供应商图片能力、附图输入和图片工具完成事件。这个版本的图片事件有 `result` 和 `savedPath`，没有参考图哈希字段。获得图片后需要在对比页核对主体与构图。账号及供应商当下是否可用仍以实际连接为准。
+本机 ChatGPT 桌面应用随附的 Codex 为 0.171.0-alpha.13。已核对这个可执行文件的 OpenAI 签名及其生成的稳定协议定义。该版本支持查询登录、供应商出图能力，并接受本地参考图。图片工具完成事件可报告 `savedPath` 和 `inputImages[].sha256`。仅从临时目录取回图片，实际能否出图及保存在哪里，仍需首图验证。
 
 1. 在每次运行新建的空工作目录中用 stdio 启动 `codex app-server`。发送 `initialize` 和 `initialized`，查询 `account/read`、`experimentalFeature/list`、`modelProvider/capabilities/read`、`model/list`、`account/rateLimits/read`。客户端不请求刷新凭据，只保留账号类型及相关额度窗口。
 2. 每张原画新建一个临时 `thread/start`，指定 OpenAI 供应商、只读策略、禁审批，并检查服务端回显。模型工具关闭 shell、MCP、应用、插件、hooks、网页搜索等。真正提交前，macOS 还会限制整个 app-server 的文件写入和子进程。它仅可写本次临时目录，网络仍供官方模型服务使用。系统隔离未能启用时终止。报告由父进程直接写入本工作树。
@@ -35,7 +35,9 @@ PATH="$HOME/.local/bin:$PATH" node experiments/codex-imagegen/run.cjs --limit 1
 
 ## 验证记录
 
-2026-11-21，日常 0.156.1 的第 1 张素材 SHA-256 与清单一致。开发环境在启动 Codex 服务前拒绝叠加 macOS 写入限制。因此这次两次账号检查均未执行，首图提交 0 次，产图 0 张；日常登录和首图仍待普通终端验证。
+桌面端优先模式在本机定位到经 OpenAI 签名的 0.171.0-alpha.13，已用它实际导出协议，并核对首图与清单中的 SHA-256。零提交预检记录了桌面包内的可执行文件路径。开发环境在启用 macOS 写入限制时停止，服务未启动，首次连接和重连均未查询到账号。此次提交 0 张、产图 0 张。普通终端的单图命令包含相同的写入限制和登录门槛。
+
+此前独立安装版试验中，0.156.1 的第 1 张素材 SHA-256 与清单一致。开发环境在启动 Codex 服务前拒绝叠加 macOS 写入限制。因此这次两次账号检查均未执行，首图提交 0 次，产图 0 张；日常登录和首图仍待普通终端验证。
 
 历史临时登录命令 `--login-check`、`--login-first-image` 会使用独立的临时登录配置，不用于本阶段。
 

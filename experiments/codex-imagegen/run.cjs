@@ -7,7 +7,8 @@ const { execFileSync } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
 const { AppServerClient } = require('./client.cjs');
 const { loadDataset, prepareSample, writeReport } = require('./report.cjs');
-const { isolateGeneration, cliOnPath } = require('./isolation.cjs');
+const { isolateGeneration } = require('./isolation.cjs');
+const { findDesktopCli } = require('./desktop-cli.cjs');
 const { collectImage } = require('./image.cjs');
 const { temporaryLoginEnvironment, loginInTerminal } = require('./login-check.cjs');
 
@@ -312,7 +313,9 @@ async function run(mode) {
     const baseEnv = temporaryLogin
       ? await temporaryLoginEnvironment(tempRoot, process.env)
       : childEnvironment(tempRoot);
-    const cliPath = await cliOnPath(baseEnv.PATH, cwd);
+    const cliPath = await findDesktopCli();
+    results.environment.codexSource = 'chatgpt-desktop-bundle';
+    results.environment.codexExecutable = cliPath;
     const env = await isolateGeneration(tempRoot, baseEnv, cliPath);
     results.environment.codexVersion = execFileSync('codex', ['--version'], {
       cwd, env, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'],

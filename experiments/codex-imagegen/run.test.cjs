@@ -167,8 +167,8 @@ test('the default dry run stops before handshake when the generation launcher is
   for (const file of ['image.cjs', 'client.cjs', 'report.cjs', 'login-check.cjs']) {
     await fs.symlink(path.join(__dirname, file), path.join(dir, file));
   }
+  await fs.writeFile(path.join(dir, 'desktop-cli.cjs'), 'exports.findDesktopCli = async () => process.execPath;');
   await fs.writeFile(path.join(dir, 'isolation.cjs'), `
-    exports.cliOnPath = async () => process.execPath;
     exports.isolateGeneration = async () => { throw new Error('mock isolation refused'); };
   `);
   const { spawnSync } = require('node:child_process');
@@ -180,6 +180,8 @@ test('the default dry run stops before handshake when the generation launcher is
   const [runDir] = await fs.readdir(path.join(root, 'output'));
   const report = JSON.parse(await fs.readFile(path.join(root, 'output', runDir, 'results.json')));
   assert.equal(report.mode, 'dry-run');
+  assert.equal(report.environment.codexExecutable, process.execPath);
+  assert.equal(report.environment.codexSource, 'chatgpt-desktop-bundle');
   assert.equal(report.error, 'mock isolation refused');
   assert.equal(report.preflight.ready, false);
   assert.equal(report.preflight.handshake, false);
@@ -227,8 +229,8 @@ test('daily sessions reconnect to the same profile and stop immediately if eithe
         });
       } else process.exit(7);
     `, { mode: 0o700 });
+    await fs.writeFile(path.join(dir, 'desktop-cli.cjs'), `exports.findDesktopCli = async () => ${JSON.stringify(cli)};`);
     await fs.writeFile(path.join(dir, 'isolation.cjs'), `
-      exports.cliOnPath = async () => ${JSON.stringify(cli)};
       exports.isolateGeneration = async (_root, env, cli) => {
         if (cli !== ${JSON.stringify(cli)}) throw new Error('unexpected executable');
         return env;
@@ -243,6 +245,8 @@ test('daily sessions reconnect to the same profile and stop immediately if eithe
     assert.equal(result.status, verified ? 0 : 1, result.stderr);
     const [reportDir] = await fs.readdir(path.join(root, 'output'));
     const report = JSON.parse(await fs.readFile(path.join(root, 'output', reportDir, 'results.json')));
+    assert.equal(report.environment.codexExecutable, cli);
+    assert.equal(report.environment.codexSource, 'chatgpt-desktop-bundle');
     assert.equal(report.existingLogin.verified, verified);
     assert.equal(report.preflight.ready, verified);
     assert.equal(report.existingLogin.first.accountType, accounts[0] ?? 'signed-out');
