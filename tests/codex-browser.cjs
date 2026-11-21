@@ -16,8 +16,10 @@ test('Codex one-click login, failures, explicit printing and history', {skip:pro
   const host=path.join(dir,'host');
   const registry=path.join(dir,'NativeMessagingHosts');
   const image='data:image/png;base64,'+await fs.readFile(fixture,'base64');
+  const fixtureCopy=path.join(dir,'artwork.png');
   let ctx;
   try{
+    await fs.copyFile(fixture,fixtureCopy);
     await fs.cp(path.resolve(__dirname,'../extension'),ext,{recursive:true});
     const bridge=path.join(ext,'codex.js');
     const code=await fs.readFile(bridge,'utf8');
@@ -29,6 +31,7 @@ test('Codex one-click login, failures, explicit printing and history', {skip:pro
     await fs.writeFile(path.join(registry,name+'.json'),JSON.stringify({name,description:'test fixture',path:host,type:'stdio',allowed_origins:[origin]}));
     await fs.writeFile(host,'#!'+process.execPath+'\n'+
       `const fs=require('node:fs');const {serve}=require(${JSON.stringify(require.resolve('../native/host.cjs'))});
+       const {preparePrint}=require(${JSON.stringify(require.resolve('../native/operation.cjs'))});
        serve(process.stdin,process.stdout,async request=>{
         fs.appendFileSync(${JSON.stringify(calls)},request.type+'\\n');
         const mode=fs.readFileSync(${JSON.stringify(statusFile)},'utf8');
@@ -36,7 +39,8 @@ test('Codex one-click login, failures, explicit printing and history', {skip:pro
         if(mode==='signed-out')throw Error('本次连接未识别到已有登录');
         if(request.type==='connect')return {connected:true};
         if(request.confirmed!==true||!request.data.startsWith('data:image/'))throw Error('Invalid print');
-        return {image:${JSON.stringify(image)},model:'test',provider:'codex',seconds:1};
+        const image=await preparePrint(${JSON.stringify(dir)},{outputImage:'artwork.png',width:256,height:384});
+        return {image,model:'test',provider:'codex',seconds:1};
        }).finally(()=>process.stdin.destroy());`,{mode:0o700});
     ctx=await chromium.launchPersistentContext(dir,{headless:true,executablePath,args:['--disable-extensions-except='+ext,'--load-extension='+ext]});
     const worker=ctx.serviceWorkers()[0]||await ctx.waitForEvent('serviceworker');
@@ -71,6 +75,8 @@ test('Codex one-click login, failures, explicit printing and history', {skip:pro
     await overlay.locator('.retry').click();await overlay.locator('.panel.ready').waitFor();
     const history=await worker.evaluate(async()=>(await chrome.storage.local.get('history')).history);
     assert.equal(history.length,1);assert.equal(history[0].provider,'codex');
+    assert.ok(history[0].image.startsWith('data:image/jpeg;base64,'));
+    assert.deepEqual(await overlay.locator('.result').evaluate(img=>[img.naturalWidth,img.naturalHeight]),[256,384]);
     await page.reload();await page.locator('#art').hover();await overlay.locator('.panel.ready').waitFor();
     assert.equal((await fs.readFile(calls,'utf8')).trim().split('\n').filter(x=>x==='generate').length,1);
   }finally{if(ctx)await ctx.close();await fs.rm(dir,{recursive:true,force:true});}

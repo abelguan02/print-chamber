@@ -34,6 +34,6 @@ async function codexGenerate(blob) {
   let binary='';
   for(let i=0;i<bytes.length;i+=8192)binary+=String.fromCharCode(...bytes.subarray(i,i+8192));
   const result=await codexRequest({type:'generate',confirmed:true,data:'data:'+blob.type+';base64,'+btoa(binary)});
-  const output=await (await fetch(result.image)).blob();
-  return {...result,image:await Cloud.prepare(output,1280)};
+  if (!result.image.startsWith('data:image/jpeg;base64,')) throw Error('本机助手返回了无效的打印图片');
+  return result;
 }

@@ -16,5 +16,5 @@
 | 任务 | 文件 | 状态 |
 |---|---|---|
 | 01 设置页去除说明小字 | `01-settings-no-helper-text.md` | 待开发 |
-| 02 Codex 出图可行性验证 | `02-codex-imagegen-feasibility.md` | 待开发 |
+| 02 Codex 出图可行性验证 | `02-codex-imagegen-feasibility.md` | 本机首图与扩展实际打印已验收，测量边界见任务单 |
 | 03 GitHub 安装包与自动配对 | 待验证 02 后拆分编写 | 未开始 |

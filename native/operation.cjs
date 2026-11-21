@@ -1,6 +1,8 @@
 'use strict';
 const fs = require('node:fs/promises');
 const os = require('node:os');
+const {execFile} = require('node:child_process');
+const {promisify} = require('node:util');
 const path = require('node:path');
 const {createHash} = require('node:crypto');
 const {AppServerClient} = require('../experiments/codex-imagegen/client.cjs');
@@ -8,6 +10,21 @@ const {findDesktopCli} = require('../experiments/codex-imagegen/desktop-cli.cjs'
 const {isolateDesktopImage} = require('../experiments/codex-imagegen/isolation.cjs');
 const {SERVER_ARGS, confirmChatgpt, preflight, startImageThread, runTurn} = require('../experiments/codex-imagegen/run.cjs');
 require('../extension/cloud-prompt.js');
+
+const execFileAsync = promisify(execFile);
+const PRINT_LONG_EDGE = 640;
+
+async function preparePrint(temp, {outputImage, width, height}) {
+  const input = path.join(temp, outputImage);
+  if (width * height > 24000000 || (await fs.stat(input)).size > 12000000) {
+    throw Error('生成图片超过尺寸或文件大小限制');
+  }
+  const output = path.join(temp, 'print.jpg');
+  const resize = Math.max(width, height) > PRINT_LONG_EDGE ? ['-Z', String(PRINT_LONG_EDGE)] : [];
+  await execFileAsync('/usr/bin/sips', [...resize, '-s', 'format', 'jpeg', '-s', 'formatOptions', '90',
+    input, '--out', output], {timeout:30000});
+  return 'data:image/jpeg;base64,' + await fs.readFile(output, 'base64');
+}
 
 async function operate(request, signal) {
   const generate = request.type === 'generate' && request.confirmed === true;
@@ -53,10 +70,8 @@ async function operate(request, signal) {
     await runTurn({client,listen:fn=>{listener=fn;},record,source,prompt:globalThis.CLOUD_PROMPT,
       model,tempRoot:temp,cwd:temp,outputDir:temp,inputPath,singleAttempt:true,directImage:true});
     await client.close();
-    const file=path.join(temp,record.outputImage);
-    if ((await fs.stat(file)).size>16000000) throw Error('生成结果超过 16 MB');
-    const image=await fs.readFile(file,'base64');
-    return {image:'data:image/'+record.format.toLowerCase()+';base64,'+image,seconds:record.durationMs/1000,provider:'codex',model};
+    const image = await preparePrint(temp, record);
+    return {image, seconds:record.durationMs/1000, provider:'codex', model};
   } catch (error) {
     if (error.code === 'APP_SERVER_REQUEST_TIMEOUT' && error.method === 'thread/start') {
       throw Error(`Codex 创建会话超过 ${error.timeoutMs / 1000} 秒，已停止，原画未提交。`);
@@ -67,4 +82,4 @@ async function operate(request, signal) {
     try { await close(); } finally { await fs.rm(temp,{recursive:true,force:true}); }
   }
 }
-module.exports={operate};
+module.exports={operate,preparePrint};

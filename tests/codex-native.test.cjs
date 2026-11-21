@@ -41,3 +41,22 @@ test('native disconnect aborts the in-flight operation',async()=>{
   await serving;
   assert.equal(aborted,true);assert.equal(output.readableLength,0);
 });
+
+test('large prints preserve aspect ratio at a 640 pixel long edge', {skip:process.platform!=='darwin'}, async t=>{
+  const fs=require('node:fs/promises');
+  const path=require('node:path');
+  const os=require('node:os');
+  const {execFileSync}=require('node:child_process');
+  const {preparePrint}=require('../native/operation.cjs');
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'pc-print-size-'));
+  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
+  const source=path.join(dir,'wide.png');
+  execFileSync('/usr/bin/sips',['-z','400','800',path.join(__dirname,'fixtures/artwork.png'),'--out',source]);
+  const image=await preparePrint(dir,{outputImage:'wide.png',width:800,height:400});
+  assert.ok(image.startsWith('data:image/jpeg;base64,'));
+  const output=path.join(dir,'received.jpg');
+  await fs.writeFile(output,Buffer.from(image.split(',')[1],'base64'));
+  const info=execFileSync('/usr/bin/sips',['-g','pixelWidth','-g','pixelHeight',output],{encoding:'utf8'});
+  assert.match(info,/pixelWidth: 640\b/);
+  assert.match(info,/pixelHeight: 320\b/);
+});
