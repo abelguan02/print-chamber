@@ -3,6 +3,7 @@
 <body><main><header><span>PRINT CHAMBER</span><h1>生成设置</h1></header>
 <form id="settings"><fieldset id="fields" disabled>
 <label for="mode">生成方式</label><select id="mode"><option value="cloud">云端 API</option><option value="local">本地模型 · Apple Silicon</option></select>
+<section id="codex-fields" hidden><button id="codex-connect" type="button">连接 Codex</button></section>
 <section id="local-note" hidden>
 <label for="local-token">本地连接码</label><input id="local-token" type="password" autocomplete="off" spellcheck="false" maxlength="1024" placeholder="粘贴菜单栏小助手中的连接码">
 <p id="local-key-state" hidden></p>

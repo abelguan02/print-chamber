@@ -16,7 +16,10 @@ function visibility() {
   const cloud = $('#mode').value === 'cloud';
   $('#cloud-fields').hidden = !cloud;
   $('#trial-section').hidden = !cloud;
-  $('#local-note').hidden = cloud;
+  $('#local-note').hidden = $('#mode').value !== 'local';
+  const codex = $('#mode').value === 'codex';
+  $('#codex-fields').hidden = !codex;
+  $('#save-settings').hidden = codex;
 }
 
 function providerFields() {
@@ -91,6 +94,7 @@ $('#mode').onchange = () => {
   $('#notice').textContent = '';
   visibility();
   clearResult();
+  if ($('#mode').value === 'codex') $('#notice').textContent = saved.mode === 'codex' ? '已启用' : '未连接';
 };
 $('#provider').onchange = () => {
   providerFields();
@@ -107,12 +111,27 @@ for (const id of ['key', 'region', 'workspace', 'model']) {
 
 $('#settings').onsubmit = event => {
   event.preventDefault();
+  if ($('#mode').value === 'codex') return;
   action(async () => {
     if ($('#mode').value === 'cloud' && !await acknowledgeCloudCharge()) return;
     await save();
     $('#notice').textContent = saved.mode === 'cloud' ? '已启用云端生成' : '已保存';
   });
 };
+
+$('#codex-connect').onclick = () => action(async () => {
+  const {codexUsageAcknowledged} = await chrome.storage.local.get('codexUsageAcknowledged');
+  if (codexUsageAcknowledged !== true) {
+    if (!confirm('Codex 生成会把原画发送给 OpenAI，并消耗你的 Codex 额度。继续？')) {
+      $('#notice').textContent = '已取消';
+      return;
+    }
+    await chrome.storage.local.set({codexUsageAcknowledged:true});
+  }
+  const connection = await send({type:'codex-connect'});
+  saved.mode = 'codex';
+  $('#notice').textContent = connection.source === 'standalone' ? '已连接 · 独立版' : '已连接 · 桌面版';
+});
 
 $('#local-check').onclick = () => action(async () => {
   $('#notice').textContent = '';
@@ -160,11 +179,16 @@ $('#trial').onclick = () => action(async () => {
   $('#notice').textContent = `生成完成 · ${result.seconds.toFixed(1)} 秒`;
 });
 
-Promise.all([send({type: 'cloud-load'}), chrome.storage.local.get(['generationMode', 'token'])])
-  .then(([config, local]) => {
+Promise.all([send({type: 'cloud-load'}), chrome.storage.local.get(['generationMode', 'token']),
+  chrome.runtime.sendMessage({type:'codex-detect'})])
+  .then(([config, local, detection]) => {
+    if (detection?.found) $('#mode').add(new Option('本机 Codex', 'codex'));
     const firstUse = !local.generationMode && !local.token && !Object.values(config.configs).some(c => c.hasKey);
     saved = config;
-    $('#mode').value = firstUse ? 'cloud' : config.mode;
+    const missing = config.mode === 'codex' && !detection?.found;
+    $('#mode').value = firstUse || missing ? 'cloud' : config.mode;
+    if (detection?.error || missing) $('#notice').textContent = detection?.error || '未找到 Codex';
+    else if (config.mode === 'codex') $('#notice').textContent = '已启用';
     $('#provider').value = config.provider;
     providerFields();
     visibility();

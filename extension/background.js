@@ -1,4 +1,4 @@
-importScripts('cloud.js', 'cloud-config.js', 'cloud-prompt.js');
+importScripts('cloud.js', 'cloud-config.js', 'cloud-prompt.js', 'codex.js');
 const ENDPOINT = 'http://127.0.0.1:8877';
 let busy = false;
 let activeJob = null;
@@ -28,8 +28,8 @@ async function generate(message, tab) {
       promptHash:saved.promptHash, seed:saved.seed, width:saved.width, height:saved.height};
   }
   // Preview is read-only; cloud generation always requires an explicit button action.
-  if (generationMode==='cloud' && message.confirmed!==true)
-    return {needsGeneration:true, confirmationRequired:true};
+  if (['cloud','codex'].includes(generationMode) && message.confirmed!==true)
+    return {needsGeneration:true, confirmationRequired:true,...(generationMode==='codex' && {provider:'codex'})};
   if (generationMode==='local' && !token) throw new Error('请点开插件，填写本地连接码或选择云端生成');
   if (message.type==='preview') return {needsGeneration:true, confirmationRequired:false};
   if (busy) throw new Error('正在处理另一张图片，请稍后重试');
@@ -56,7 +56,10 @@ async function generate(message, tab) {
       blob = await limitedImage(response);
     }
     let data;
-    if(generationMode==='cloud'){
+    if(generationMode==='codex'){
+      if ((await chrome.storage.local.get('codexUsageAcknowledged')).codexUsageAcknowledged!==true) throw Error('请先在生成设置中连接 Codex');
+      data=await codexGenerate(blob);
+    }else if(generationMode==='cloud'){
       const config=await CloudConfig.active();
       data=await cloudGenerate(config,blob);
       await CloudConfig.verified(config);
@@ -104,6 +107,13 @@ async function cloudAction(message){
   if(busy)throw Error('正在生成图片，请完成后再修改设置或测试');
   busy=true;
   try{
+    if(message.type==='codex-connect'){
+      const {codexUsageAcknowledged}=await chrome.storage.local.get('codexUsageAcknowledged');
+      if(codexUsageAcknowledged!==true)throw Error('尚未确认 Codex 额度使用');
+      const result=await codexRequest({type:'connect'});
+      await chrome.storage.local.set({generationMode:'codex',codexInstallation:{source:result.source,version:result.version}});
+      return result;
+    }
     if(message.type==='cloud-save')return await CloudConfig.save(message.config);
     if(message.type==='cloud-forget')return await CloudConfig.forget(message.provider);
     const c=await CloudConfig.active();
@@ -159,9 +169,10 @@ async function limitedImage(response) {
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if(typeof message?.type!=='string')return;
-  if(message.type.startsWith('cloud-')){
-    if(sender.id!==chrome.runtime.id || sender.url!==chrome.runtime.getURL('settings.html')){reply({error:'仅设置页面可管理云端配置'});return;}
-    cloudAction(message).then(reply).catch(e=>reply({error:e.message}));return true;
+  if(message.type.startsWith('cloud-') || ['codex-detect','codex-connect'].includes(message.type)){
+    if(sender.id!==chrome.runtime.id || sender.url!==chrome.runtime.getURL('settings.html')){reply({error:'仅设置页面可管理生成配置'});return;}
+    const operation=message.type==='codex-detect'?codexRequest({type:'detect'}):cloudAction(message);
+    operation.then(reply).catch(e=>reply({error:e.message}));return true;
   }
   if(message.type==='delete-history-batch'){
     if(sender.id!==chrome.runtime.id || !Array.isArray(message.ids) || message.ids.length>48 || !message.ids.every(id=>typeof id==='string'&&id.length<200)){

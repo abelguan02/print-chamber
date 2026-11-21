@@ -103,7 +103,7 @@
       if (ticket !== version) return;
       if (!retry && (!result || result.error)) throw new Error(result?.error || '连接已中断，请重试');
       if (result?.confirmationRequired && !confirmed) {
-        state('waiting','点击「打印」后上传原画，云端生成可能计费');return;
+        state('waiting',result.provider==='codex'?'点击「打印」生成':'点击「打印」后上传原画，云端生成可能计费');return;
       }
       if (retry || result.needsGeneration) {
         state('feeding','正在读取原画…');$('.ghost img').src=img.url;
@@ -125,7 +125,7 @@
       if (!result || result.error) throw new Error(result?.error || '连接已中断，请重试');
       // The mode may have changed since lookup. The background still guards uploads.
       if (result.confirmationRequired) {
-        state('waiting','点击「打印」后上传原画，云端生成可能计费');return;
+        state('waiting',result.provider==='codex'?'点击「打印」生成':'点击「打印」后上传原画，云端生成可能计费');return;
       }
       $('.result').src = result.image;
       await $('.result').decode();
@@ -133,9 +133,9 @@
       currentResult=result;
       const finish=()=>{
         if (ticket !== version) return;
-        const cloud=result.provider && result.provider!=='local';
-        state('ready',result.fromHistory?`历史打印 · ${cloud?'云端':'本地'}结果`:
-          `${result.cached?'已打印':cloud?'云端打印':'本地打印'} · ${Number(result.seconds||((performance.now()-started)/1000)).toFixed(1)} 秒${result.historyError?' · 记录保存失败':''}`);
+        const provider=result.provider==='codex'?'Codex':result.provider && result.provider!=='local'?'云端':'本地';
+        state('ready',result.fromHistory?`历史打印 · ${provider}结果`:
+          `${result.cached?'已打印':provider+'打印'} · ${Number(result.seconds||((performance.now()-started)/1000)).toFixed(1)} 秒${result.historyError?' · 记录保存失败':''}`);
         if(result.fromHistory)$('.caption').title=[result.provider||'local',result.model].filter(Boolean).join(' · ');
         panel.dataset.totalMs = String(Math.round(performance.now() - enteredAt));
         markPrinted(img.element);

@@ -67,6 +67,8 @@ Python 契约测试使用真实 HTTP handler、临时端口及合成图片，只
 浏览器默认使用锁定 Playwright 对应的 Chromium；需要测试其他版本时显式设置
 `PRINT_CHAMBER_CHROMIUM`，不要将本机路径写进代码。
 
+在已登记本机助手且 Codex 已登录的 Mac 上，可单独运行 `node --test tests/codex-session-live.cjs` 排查创建会话。它在独立的无窗口 Chrome 测试资料中加载实际扩展，经过与打印相同的预检和会话配置，输出 `thread/start` 的回包耗时，随后关闭临时会话。检查不会发起新登录或模型轮次。设置页「连接 Codex」查询已有登录与可用额度。
+
 ## 实机验收（单独执行）
 
 1. 菜单栏点“停止模型”，确认插件显示离线；点“启动模型”，等待就绪。

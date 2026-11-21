@@ -11,6 +11,7 @@ test('About page: manifest version, links, clipboard feedback, responsive layout
  try{
   context=await chromium.launchPersistentContext(profile,{headless:true,executablePath:require('./browser-options.cjs').executablePath,args:[`--disable-extensions-except=${root}/extension`,`--load-extension=${root}/extension`]});
   const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');
+  await require('./browser-options.cjs').mockAbsentCodex(worker);
   const base='chrome-extension://'+new URL(worker.url()).host;
   const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.goto(base+'/about.html');

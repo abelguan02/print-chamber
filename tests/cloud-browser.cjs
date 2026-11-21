@@ -7,6 +7,7 @@ test('cloud settings, private keys, trial and explicit print with history reuse'
  const context=await chromium.launchPersistentContext(profile,{headless:true,executablePath:require('./browser-options.cjs').executablePath,args:[`--disable-extensions-except=${root}/extension`,`--load-extension=${root}/extension`]});
  try{
   const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');const id=new URL(worker.url()).host;
+  await require('./browser-options.cjs').mockAbsentCodex(worker);
   const image='data:image/png;base64,'+fs.readFileSync(require('./browser-options.cjs').fixture).toString('base64');
   await worker.evaluate(image=>{
    const original=fetch;globalThis.requests=[];globalThis.rejectNext=false;let polls=0;

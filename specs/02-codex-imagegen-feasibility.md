@@ -70,3 +70,10 @@ node experiments/codex-imagegen/run.cjs --all           # 跑全部 5 张
 3. 代码中没有读取 `~/.codex` 下文件或处理 token 的逻辑（审核时 `grep -rn "auth.json\|ACCESS_TOKEN\|\.codex/" experiments/` 应仅出现在注释或 README 的禁止说明中）。
 4. 仓库其他文件无改动（`git diff --stat main` 只含 `experiments/` 与可能的 `.gitignore`）。
 5. `--all` 不由 Codex 在开发时运行，留给用户执行（避免开发过程消耗大量额度）；开发阶段最多运行 `--limit 1` 两次。
+
+## 结果（2026-11-21）
+
+桌面端 Codex 首次连接与重连均复用了本机 ChatGPT 登录。
+清单首图按 G3 实际生成一次，得到 1778 × 884 PNG，工具记录的参考图 SHA-256 与原画匹配。
+从提交到收图、校验和清理完毕共 43.412 秒。用户在日常 Chrome 的扩展里也完成了实际打印并看到了结果。
+其余 4 张未测，全组成功率与成功首图的单张额度消耗未知。[回执与过程记录](../experiments/codex-imagegen/README.md)

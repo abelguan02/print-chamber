@@ -5,6 +5,7 @@ const fs=require('fs');const assert=require('node:assert/strict');
  const context=await chromium.launchPersistentContext(profile,{headless:true,viewport:{width:1440,height:1000},executablePath:require('./tests/browser-options.cjs').executablePath,args:[`--disable-extensions-except=${__dirname}/extension`,`--load-extension=${__dirname}/extension`]});
  try{
  const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');const id=new URL(worker.url()).host;
+  await require('./tests/browser-options.cjs').mockAbsentCodex(worker);
  const result='data:image/png;base64,'+fs.readFileSync(require('./tests/browser-options.cjs').fixture).toString('base64');
  await worker.evaluate(async image=>{
   await chrome.storage.local.clear();await chrome.storage.local.set({token:'test',enabled:true});
