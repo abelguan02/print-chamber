@@ -6,6 +6,7 @@ test('Local setup: first use, state checks, shared token persistence and cloud m
  try{
   context=await chromium.launchPersistentContext(profile,{headless:true,executablePath:require('./browser-options.cjs').executablePath,args:[`--disable-extensions-except=${root}/extension`,`--load-extension=${root}/extension`]});
   const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');const base='chrome-extension://'+new URL(worker.url()).host;
+  await require('./browser-options.cjs').mockAbsentCodex(worker);
   let healthRequests=0;
   await context.route('http://127.0.0.1:8877/health',r=>{healthRequests++;return r.fulfill({contentType:'application/json',body:'{"ready":true,"failed":false,"busy":false}'});});
   const popup=await context.newPage();const errors=[];popup.on('pageerror',e=>errors.push(e.message));

@@ -57,6 +57,7 @@ async function generate(message, tab) {
     }
     let data;
     if(generationMode==='codex'){
+      if ((await chrome.storage.local.get('codexUsageAcknowledged')).codexUsageAcknowledged!==true) throw Error('请先在生成设置中连接 Codex');
       data=await codexGenerate(blob);
     }else if(generationMode==='cloud'){
       const config=await CloudConfig.active();
@@ -81,7 +82,6 @@ async function generate(message, tab) {
     data.promptHash = expectedHash;
     try {
       const record = {id: crypto.randomUUID(), image: data.image, seconds: data.seconds, provider:data.provider||'local', model:data.model, sourceUrl: message.url,
-        ...(generationMode==='codex' && data.timings && {timings:data.timings}),
         promptHash:data.promptHash, seed:data.seed, width:data.width, height:data.height,
         pageUrl: tab.url, title: (tab.title || '查看原作').slice(0,200), site: new URL(tab.url).hostname, createdAt: Date.now()};
       await updateHistory(history=>{
@@ -108,8 +108,10 @@ async function cloudAction(message){
   busy=true;
   try{
     if(message.type==='codex-connect'){
+      const {codexUsageAcknowledged}=await chrome.storage.local.get('codexUsageAcknowledged');
+      if(codexUsageAcknowledged!==true)throw Error('尚未确认 Codex 额度使用');
       const result=await codexRequest({type:'connect'});
-      await chrome.storage.local.set({generationMode:'codex'});
+      await chrome.storage.local.set({generationMode:'codex',codexInstallation:{source:result.source,version:result.version}});
       return result;
     }
     if(message.type==='cloud-save')return await CloudConfig.save(message.config);
@@ -167,20 +169,10 @@ async function limitedImage(response) {
 
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if(typeof message?.type!=='string')return;
-  if(message.type.startsWith('cloud-')||message.type==='codex-connect'){
-    const fromPopup=message.type==='codex-connect' && sender.url===chrome.runtime.getURL('popup.html');
-    if(sender.id!==chrome.runtime.id || (!fromPopup && sender.url!==chrome.runtime.getURL('settings.html'))){reply({error:'仅设置页面可管理云端配置'});return;}
-    cloudAction(message).then(reply).catch(e=>reply({error:e.message}));return true;
-  }
-  if(message.type==='codex-displayed'){
-    const {recordId, elapsedMs}=message;
-    if(sender.id!==chrome.runtime.id || !sender.tab || typeof recordId!=='string' ||
-        !Number.isSafeInteger(elapsedMs) || elapsedMs<0){reply({error:'显示耗时无效'});return;}
-    updateHistory(history=>history.map(record=>
-      record.id===recordId && record.provider==='codex' && record.timings?.receiveToDisplayMs===null
-        ? {...record,timings:{...record.timings,receiveToDisplayMs:elapsedMs}}
-        : record
-    )).then(()=>reply({ok:true})).catch(()=>reply({error:'显示耗时保存失败'}));return true;
+  if(message.type.startsWith('cloud-') || ['codex-detect','codex-connect'].includes(message.type)){
+    if(sender.id!==chrome.runtime.id || sender.url!==chrome.runtime.getURL('settings.html')){reply({error:'仅设置页面可管理生成配置'});return;}
+    const operation=message.type==='codex-detect'?codexRequest({type:'detect'}):cloudAction(message);
+    operation.then(reply).catch(e=>reply({error:e.message}));return true;
   }
   if(message.type==='delete-history-batch'){
     if(sender.id!==chrome.runtime.id || !Array.isArray(message.ids) || message.ids.length>48 || !message.ids.every(id=>typeof id==='string'&&id.length<200)){

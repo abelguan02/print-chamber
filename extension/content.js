@@ -103,7 +103,7 @@
       if (ticket !== version) return;
       if (!retry && (!result || result.error)) throw new Error(result?.error || '连接已中断，请重试');
       if (result?.confirmationRequired && !confirmed) {
-        state('waiting',result.provider==='codex'?'点击「打印」后发送原画并使用 Codex 额度':'点击「打印」后上传原画，云端生成可能计费');return;
+        state('waiting',result.provider==='codex'?'点击「打印」生成':'点击「打印」后上传原画，云端生成可能计费');return;
       }
       if (retry || result.needsGeneration) {
         state('feeding','正在读取原画…');$('.ghost img').src=img.url;
@@ -125,7 +125,7 @@
       if (!result || result.error) throw new Error(result?.error || '连接已中断，请重试');
       // The mode may have changed since lookup. The background still guards uploads.
       if (result.confirmationRequired) {
-        state('waiting',result.provider==='codex'?'点击「打印」后发送原画并使用 Codex 额度':'点击「打印」后上传原画，云端生成可能计费');return;
+        state('waiting',result.provider==='codex'?'点击「打印」生成':'点击「打印」后上传原画，云端生成可能计费');return;
       }
       $('.result').src = result.image;
       await $('.result').decode();
@@ -139,18 +139,6 @@
         if(result.fromHistory)$('.caption').title=[result.provider||'local',result.model].filter(Boolean).join(' · ');
         panel.dataset.totalMs = String(Math.round(performance.now() - enteredAt));
         markPrinted(img.element);
-        if (result.recordId && !result.fromHistory && Number.isFinite(result.receivedAt)) {
-          // DONE follows image decode and the reveal animation. Allow a frame to paint it.
-          requestAnimationFrame(()=>requestAnimationFrame(async ()=>{
-            if (ticket !== version || document.hidden) return;
-            const elapsedMs = Date.now() - result.receivedAt;
-            if (elapsedMs < 0) return;
-            try {
-              const saved = await chrome.runtime.sendMessage({type:'codex-displayed',recordId:result.recordId,elapsedMs});
-              if (saved?.error && ticket===version) $('.caption').title=saved.error;
-            } catch { if (ticket===version) $('.caption').title='显示耗时保存失败'; }
-          }));
-        }
       };
       if(result.fromHistory){finish();return;}
       state('revealing','逐层打印中…');

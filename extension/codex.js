@@ -5,7 +5,7 @@ function codexRequest(request) {
     const chunks=[];
     let size=0,finished=false;
     // Printing includes login/preflight, up to 90 s for thread/start, and a separate 5 min turn.
-    const timer=setTimeout(()=>finish(null,'本机 Codex 等待超时，操作已停止'),request.type==='connect'?30000:480000);
+    const timer=setTimeout(()=>finish(null,'本机 Codex 等待超时，操作已停止'),request.type==='generate'?480000:30000);
     function finish(result,error){
       if(finished)return;
       finished=true; clearTimeout(timer); port.disconnect();
@@ -13,7 +13,9 @@ function codexRequest(request) {
     }
     port.onDisconnect.addListener(()=>{
       const reason=chrome.runtime.lastError?.message||'';
-      finish(null,/not found|forbidden|not registered/i.test(reason)?'Chrome 找不到匹配的 Print Chamber 本机助手，请先登记助手并加载对应的扩展目录。':'本机 Codex 连接已中断，请重新连接。');
+      const missing=/not found|forbidden|not registered/i.test(reason);
+      if(request.type==='detect' && missing)return finish({found:false});
+      finish(null,missing?'未登记本机助手':'本机 Codex 连接已中断');
     });
     port.onMessage.addListener(msg=>{
       if(typeof msg.error==='string')return finish(null,msg.error);
@@ -22,7 +24,8 @@ function codexRequest(request) {
         if(size>22000000)return finish(null,'Codex 返回的图片过大');
         chunks.push(msg.chunk);return;
       }
-      if(request.type==='connect'&&msg.done?.connected===true)return finish({connected:true});
+      if(request.type==='detect' && typeof msg.done?.found==='boolean')return finish(msg.done);
+      if(request.type==='connect'&&msg.done?.connected===true)return finish(msg.done);
       if(request.type==='generate'&&msg.done&&size)return finish({...msg.done,image:chunks.join('')});
       finish(null,'本机助手返回了无效结果');
     });

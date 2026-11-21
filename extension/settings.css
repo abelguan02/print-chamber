@@ -16,7 +16,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid 
 .key-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .key-row input{min-width:0;flex:1 1 200px}
 .quiet{background:transparent;text-decoration:underline}
-#check,#local-check,#trial{display:block;margin-top:12px}
+#check,#local-check,#codex-connect,#trial{display:block;margin-top:12px}
 #key-state,#local-key-state,#local-status,#verification{margin:8px 0 0}
 #save-settings{background:#34312d;color:white;width:100%;margin-top:24px}
 #notice{white-space:pre-wrap;color:#473a28}

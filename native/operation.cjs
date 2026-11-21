@@ -5,10 +5,10 @@ const {execFile} = require('node:child_process');
 const {promisify} = require('node:util');
 const path = require('node:path');
 const {createHash} = require('node:crypto');
-const {AppServerClient} = require('../experiments/codex-imagegen/client.cjs');
-const {findDesktopCli} = require('../experiments/codex-imagegen/desktop-cli.cjs');
-const {isolateDesktopImage} = require('../experiments/codex-imagegen/isolation.cjs');
-const {SERVER_ARGS, confirmChatgpt, preflight, startImageThread, runTurn} = require('../experiments/codex-imagegen/run.cjs');
+const {AppServerClient} = require('./codex/client.cjs');
+const {findCodex} = require('./codex/discovery.cjs');
+const {isolateDesktopImage} = require('./codex/isolation.cjs');
+const {SERVER_ARGS, initialize, checkAccount, imageModel, startImageThread, printTurn} = require('./codex/session.cjs');
 require('../extension/cloud-prompt.js');
 
 const execFileAsync = promisify(execFile);
@@ -28,33 +28,37 @@ async function preparePrint(temp, {outputImage, width, height}) {
 
 async function operate(request, signal) {
   const generate = request.type === 'generate' && request.confirmed === true;
-  if (!generate && request.type !== 'connect' && request.type !== 'check-session') throw Error('不支持的 Codex 操作');
+  if (!generate && !['detect','connect','check-session'].includes(request.type)) throw Error('不支持的 Codex 操作');
   const temp = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'print-chamber-codex-')));
   let client, listener;
   const close = () => client?.close();
   try {
     const base = {HOME:os.homedir(), PATH:'/usr/bin:/bin', TMPDIR:temp, CODEX_SQLITE_HOME:temp};
     if (process.env.CODEX_HOME) base.CODEX_HOME = process.env.CODEX_HOME;
-    const env = await isolateDesktopImage(temp,base,await findDesktopCli());
-    const args = SERVER_ARGS.map(s => s === 'features.code_mode=false'
-      ? 'features.code_mode={enabled=false,direct_only_tool_namespaces=["image_gen"]}' : s);
-    args.push('-c','features.omit_app_server_notification_media=false');
-    signal.throwIfAborted();
-    client = new AppServerClient({cwd:temp,env,args,onNotification:(method,params)=>listener?.(method,params)});
     signal.addEventListener('abort',close,{once:true});
-    const checks = {issues:{}};
-    if (request.type === 'connect') {
-      await confirmChatgpt(client,checks,{});
-      return {connected:true};
-    }
-    await preflight(client,checks,{});
-    const model = 'gpt-6.2-sol';
-    if (!checks.ready || checks.rateLimits?.ordinaryUsageAllowed !== true ||
-        !checks.models?.some(m=>m.model===model && m.imageInput)) throw Error('本机 Codex 的模型、图片能力或可用额度未就绪');
-    if (request.type === 'check-session') {
-      const start = performance.now();
-      await startImageThread(client, {cwd:temp, model, singleAttempt:true, directImage:true});
-      return {sessionReady:true, threadStartMs:Math.round(performance.now()-start)};
+    const detected = await findCodex(async cli=>{
+      signal.throwIfAborted();
+      const env=await isolateDesktopImage(temp,base,cli);
+      const {stdout}=await execFileAsync('codex',['--version'],{cwd:temp,env,timeout:5000,signal});
+      const version=stdout.trim();
+      if (!/^codex(?:-cli)? [0-9][0-9A-Za-z.+-]*$/.test(version)) throw Error('无效的 Codex 版本');
+      if (request.type!=='detect') {
+        signal.throwIfAborted();
+        client=new AppServerClient({cwd:temp,env,args:SERVER_ARGS,onNotification:(method,params)=>listener?.(method,params)});
+        try {await initialize(client);} catch (error) {await close();client=null;signal.throwIfAborted();throw error;}
+      }
+      return {version};
+    });
+    signal.throwIfAborted();
+    if (request.type==='detect') return detected;
+    if (!detected.found) throw Error('未找到可启动的 Codex');
+    await checkAccount(client);
+    if (request.type==='connect') return {connected:true,source:detected.source,version:detected.version};
+    const model=await imageModel(client);
+    if (request.type==='check-session') {
+      const start=performance.now();
+      await startImageThread(client,temp,model);
+      return {sessionReady:true,threadStartMs:Math.round(performance.now()-start)};
     }
     const {data} = request;
     if (typeof data!=='string'||data.length>16000040) throw Error('原画超过 12 MB');
@@ -65,13 +69,12 @@ async function operate(request, signal) {
     if (!bytes.length||bytes.length>12000000||bytes.toString('base64')!==data.slice(comma+1)) throw Error('原画数据无效');
     const inputPath=path.join(temp,'reference.'+ext);
     await fs.writeFile(inputPath,bytes);
-    const source={id:1,sha256:createHash('sha256').update(bytes).digest('hex')};
-    const record={firstEventMs:null};
-    await runTurn({client,listen:fn=>{listener=fn;},record,source,prompt:globalThis.CLOUD_PROMPT,
-      model,tempRoot:temp,cwd:temp,outputDir:temp,inputPath,singleAttempt:true,directImage:true});
+    const threadId=await startImageThread(client,temp,model);
+    const record=await printTurn({client,threadId,listen:fn=>{listener=fn;},prompt:globalThis.CLOUD_PROMPT,
+      temp,inputPath,sourceSha:createHash('sha256').update(bytes).digest('hex')});
     await client.close();
     const image = await preparePrint(temp, record);
-    return {image, seconds:record.durationMs/1000, provider:'codex', model, timings:record.timings, receivedAt:record.receivedAt};
+    return {image,seconds:record.seconds,provider:'codex',model};
   } catch (error) {
     if (error.code === 'APP_SERVER_REQUEST_TIMEOUT' && error.method === 'thread/start') {
       throw Error(`Codex 创建会话超过 ${error.timeoutMs / 1000} 秒，已停止，原画未提交。`);
