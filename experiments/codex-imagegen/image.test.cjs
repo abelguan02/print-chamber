@@ -87,3 +87,34 @@ test('rejects failed tools, text replies, missing attachments and damaged pixel 
   }
   assert.deepEqual(fs.readdirSync(output), []);
 });
+
+test('private login limits file fallback to the work and generated image directories', {
+  skip: process.platform !== 'darwin',
+}, t => {
+  const { temp, output } = setup(t);
+  const work = path.join(temp, 'work');
+  const profile = path.join(temp, 'profile');
+  const generated = path.join(profile, 'generated_images');
+  const roots = [work, generated];
+  fs.mkdirSync(work);
+  fs.mkdirSync(generated, { recursive: true });
+  const sibling = generated + '-other';
+  fs.mkdirSync(sibling);
+  const file = dir => path.join(dir, 'image.png');
+  const collect = (savedPath, id, result) => collectImage({ ...complete, savedPath, result }, temp, output, id, sha, roots);
+  for (const dir of [work, generated, profile, sibling]) {
+    fs.writeFileSync(file(dir), Buffer.from(fixtures.PNG, 'base64'));
+  }
+  for (const dir of [profile, sibling]) {
+    const rejected = collect(file(dir), 1);
+    assert.equal(rejected.outputImage, null);
+    assert.equal(rejected.reportedPathScope, 'inside-temp');
+    assert.match(rejected.error, /允许读取的图片目录/);
+  }
+  const link = path.join(work, 'link.png');
+  fs.symlinkSync(file(profile), link);
+  assert.equal(collect(link, 1).outputImage, null);
+  assert.equal(collect(file(work), 1).error, null);
+  assert.equal(collect(fs.realpathSync(file(generated)), 2).error, null);
+  assert.equal(collect(file(profile), 3, fixtures.PNG).error, null);
+});

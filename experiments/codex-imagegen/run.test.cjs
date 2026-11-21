@@ -12,7 +12,8 @@ test('default is dry and ambiguous or out-of-range options fail before launching
   assert.deepEqual(modeFrom([]), modeFrom(['--dry-run']));
   assert.deepEqual(modeFrom(['--limit', '1']), { name: 'limit', count: 1 });
   assert.deepEqual(modeFrom(['--login-check']), { name: 'login-check', count: 0 });
-  for (const args of [['--login-check', '--limit', '1'], ['--login-check', '--all'], ['--limit', '0'], ['--limit', '6'], ['--all', '--dry-run'], ['--limit']]) {
+  assert.deepEqual(modeFrom(['--login-first-image']), { name: 'login-first-image', count: 1 });
+  for (const args of [['--login-first-image', '--all'], ['--login-first-image', '--limit', '2'], ['--login-check', '--limit', '1'], ['--login-check', '--all'], ['--limit', '0'], ['--limit', '6'], ['--all', '--dry-run'], ['--limit']]) {
     assert.throws(() => modeFrom(args));
   }
 });

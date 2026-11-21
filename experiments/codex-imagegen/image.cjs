@@ -45,14 +45,22 @@ function verifyAndCopy(bytes, tempRoot, outputDir, id) {
   } finally { fs.rmSync(scratch, { recursive: true, force: true }); }
 }
 
-function confinedPath(reported, tempRoot) {
+function confinedPath(reported, tempRoot, allowedRoots) {
   if (!reported || !path.isAbsolute(reported) || reported.includes('\0') || reported.split(path.sep).includes('..')) return null;
   const physicalRoot = fs.realpathSync(tempRoot);
   // Resolve only the caller-owned root. Never resolve or inspect an external reported path.
   for (const root of [tempRoot, physicalRoot]) {
     const relative = path.relative(root, reported);
     if (relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
-      return path.join(physicalRoot, relative);
+      // A private macOS temp directory can also be named through /var or /tmp.
+      // Compare both spellings without following anything in the reported path.
+      const physical = path.join(physicalRoot, relative);
+      const declared = path.join(tempRoot, relative);
+      const allowed = allowedRoots.some(dir => {
+        const prefix = path.resolve(dir) + path.sep;
+        return physical.startsWith(prefix) || declared.startsWith(prefix);
+      });
+      return { physical, allowed };
     }
   }
   return null;
@@ -71,10 +79,10 @@ function readConfined(file) {
   } finally { fs.closeSync(fd); }
 }
 
-function collectImage(item, tempRoot, outputDir, id, sourceSha) {
+function collectImage(item, tempRoot, outputDir, id, sourceSha, allowedRoots = [tempRoot]) {
   const isImage = item?.type === 'imageGeneration';
   const reportedPath = isImage && typeof item.savedPath === 'string' ? item.savedPath : null;
-  const localFile = confinedPath(reportedPath, tempRoot);
+  const localFile = confinedPath(reportedPath, tempRoot, allowedRoots);
   const record = {
     outputImage: null, format: null, width: null, height: null, reportedPath,
     reportedPathScope: reportedPath ? (localFile ? 'inside-temp' : 'outside-or-invalid') : null,
@@ -95,12 +103,14 @@ function collectImage(item, tempRoot, outputDir, id, sourceSha) {
       return Object.assign(record, verifyAndCopy(bytes, tempRoot, outputDir, id));
     } catch (error) { errors.push(error.message); }
   }
-  if (localFile) {
+  if (localFile?.allowed) {
     try {
-      return Object.assign(record, verifyAndCopy(readConfined(localFile), tempRoot, outputDir, id));
+      return Object.assign(record, verifyAndCopy(readConfined(localFile.physical), tempRoot, outputDir, id));
     } catch (error) {
       errors.push(error.code ? `无法安全读取或保存图片（${error.code}）` : error.message);
     }
+  } else if (localFile) {
+    errors.push('上报路径不在本次允许读取的图片目录，已拒绝访问');
   } else if (reportedPath) {
     errors.push('上报路径在临时目录之外或无效，已拒绝访问');
   }

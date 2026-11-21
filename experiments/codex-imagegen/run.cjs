@@ -30,11 +30,12 @@ const SERVER_ARGS = [
 function modeFrom(args) {
   if (!args.length || (args.length === 1 && args[0] === '--dry-run')) return { name: 'dry-run', count: 0 };
   if (args.length === 1 && args[0] === '--login-check') return { name: 'login-check', count: 0 };
+  if (args.length === 1 && args[0] === '--login-first-image') return { name: 'login-first-image', count: 1 };
   if (args.length === 1 && args[0] === '--all') return { name: 'all', count: 5 };
   if (args.length === 2 && args[0] === '--limit' && /^[1-5]$/.test(args[1])) {
     return { name: 'limit', count: Number(args[1]) };
   }
-  throw new Error('请选择 --dry-run、--login-check、--limit 1 至 5 或 --all，各模式不能混用。');
+  throw new Error('请选择 --dry-run、--login-check、--login-first-image、--limit 1 至 5 或 --all，各模式不能混用。');
 }
 
 function childEnvironment(tempRoot) {
@@ -141,7 +142,7 @@ function newRecord(source) {
 }
 
 // Only one fresh thread is active. Notifications can precede the turn/start reply.
-async function runTurn({ client, listen, record, source, prompt, model, tempRoot, cwd, outputDir, timeoutMs = TURN_MS }) {
+async function runTurn({ client, listen, record, source, prompt, model, tempRoot, cwd, outputDir, allowedImageRoots, timeoutMs = TURN_MS }) {
   const thread = await client.request('thread/start', {
     cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true, modelProvider: 'openai', model,
   });
@@ -208,7 +209,7 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
       Promise.all([submit, completion]), timedOut, client.disconnected.then(error => { throw error; }),
     ]);
     if (terminalTime - start >= timeoutMs) throw new Error('单张超过 5 分钟');
-    if (completedImage) Object.assign(record, collectImage(completedImage, tempRoot, outputDir, source.id, source.sha256));
+    if (completedImage) Object.assign(record, collectImage(completedImage, tempRoot, outputDir, source.id, source.sha256, allowedImageRoots));
     if (record.turnStatus !== 'completed') throw new Error('turn/completed: ' + record.turnStatus +
       (record.turnErrorCode ? ' (' + record.turnErrorCode + ')' : ''));
     if (!record.outputImage || !record.imageToolCalled) throw new Error(record.error || '未收到图片工具的有效输出');
@@ -236,9 +237,11 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
 }
 
 async function run(mode) {
-  const temporaryLogin = mode.name === 'login-check';
+  const loginCheck = mode.name === 'login-check';
+  const firstImage = mode.name === 'login-first-image';
+  const temporaryLogin = loginCheck || firstImage;
   if (temporaryLogin && (!process.stdin.isTTY || !process.stdout.isTTY)) {
-    throw new Error('请在自己的终端窗口运行临时登录预检。');
+    throw new Error('请在自己的终端窗口运行临时登录命令。');
   }
   const outputParent = path.join(ROOT, 'output');
   await fs.mkdir(outputParent, { recursive: true });
@@ -260,7 +263,7 @@ async function run(mode) {
   process.on('SIGTERM', cancel);
   function listen(callback) { listener = callback; }
   try {
-    if (!temporaryLogin) {
+    if (!loginCheck) {
       try {
         datasetDir = await findDataset();
         dataset = await loadDataset(datasetDir);
@@ -275,7 +278,10 @@ async function run(mode) {
       const record = newRecord(source);
       results.records.push(record);
       try { Object.assign(record, await prepareSample(datasetDir, source, outputDir)); }
-      catch (error) { record.error = error.message; }
+      catch (error) {
+        record.error = error.message;
+        if (firstImage) throw error;
+      }
     }
     tempRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pc-imagegen-')));
     const cwd = path.join(tempRoot, 'work');
@@ -324,9 +330,11 @@ async function run(mode) {
         record.error = '提交前账号已拒绝额度，未出图。';
         continue;
       }
+      if (firstImage) console.log('登录预检通过，正在处理第 1 张原画。');
       try {
         await runTurn({ client, listen, record, source, prompt: dataset.g3,
-          model: results.preflight.model, tempRoot, cwd, outputDir });
+          model: results.preflight.model, tempRoot, cwd, outputDir,
+          allowedImageRoots: firstImage ? [cwd, path.join(baseEnv.CODEX_HOME, 'generated_images')] : undefined });
       } catch (error) {
         record.status = record.attempted ? 'failed' : 'skipped';
         record.error = error.message;
@@ -359,13 +367,18 @@ async function run(mode) {
   }
   console.log('报告 ' + outputDir);
   if (results.error) console.error(results.error);
-  if (temporaryLogin) {
+  if (loginCheck) {
     const ok = !cancellation.signal.aborted && !results.error && results.preflight.ready;
     console.log((ok ? '临时登录预检通过' : '临时登录预检未通过') + '，已提交 0 张。');
     return ok;
   }
   console.log('握手 ' + (results.preflight.handshake ? '完成' : '失败') + '，生成预检 ' +
     (results.preflight.ready ? '就绪' : '未就绪') + '，已提交 ' + results.records.filter(r => r.attempted).length + ' 张');
+  if (firstImage) {
+    const record = results.records[0];
+    if (record?.status === 'success') console.log('首图已生成。对比页 ' + path.join(outputDir, 'comparison.html'));
+    else if (record?.error && !results.error) console.error('首图未生成。' + record.error);
+  }
   return !cancellation.signal.aborted && !results.error && results.preflight.handshake &&
     (!mode.count || results.records.every(r => r.status === 'success'));
 }
