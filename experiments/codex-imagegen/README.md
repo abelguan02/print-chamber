@@ -14,7 +14,7 @@ node experiments/codex-imagegen/run.cjs --check-image-capability
 
 终端打印四项结果；`output/codex-image-capability-<时间戳>-<后缀>/results.json` 记录所选模型、额度判断和未查明的原因。开关与供应商能力均为真、有可用图片输入模型、账号未明确拒绝普通额度且 Codex 计量项未报告已触限，才显示“出图预检通过”。普通额度读数缺失时显示“未知”。通过表示可以尝试，实际生成还需图片工具完成事件和图片文件。
 
-2026-11-21，9 个模拟场景通过。开发环境在设置子进程权限时停止，真实四项能力均未查询，提交 0 张。普通终端的实测结果待确认。
+2026-11-21 05:05（美东），普通终端实测通过。桌面端 Codex 0.171.0-alpha.13 识别到已有 ChatGPT 登录，出图开关开启，供应商支持出图，`gpt-6.2-sol` 支持图片输入，普通额度可用。报告 `output/codex-image-capability-2026-11-21T10-05-37-321Z-xJxC5Z/results.json` 记录 `ready=true`、`submitted=0`，无错误。此前 9 个模拟场景通过。
 
 ## 已验证的登录重连
 
