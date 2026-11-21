@@ -2,7 +2,7 @@ const $=s=>document.querySelector(s);
 let saved={configs:{}},working=false;
 for(const [id,p] of Object.entries(Cloud.providers))$('#provider').add(new Option(p.name,id));
 async function send(message){const r=await chrome.runtime.sendMessage(message);if(!r||r.error)throw Error(r?.error||'设置服务未响应，请重新加载插件');return r;}
-function visibility(){const cloud=$('#mode').value==='cloud';$('#cloud-fields').hidden=!cloud;$('#trial-section').hidden=!cloud;$('#local-note').hidden=cloud;}
+function visibility(){const cloud=$('#mode').value==='cloud';$('#cloud-fields').hidden=!cloud;$('#trial-section').hidden=!cloud;const codex=$('#mode').value==='codex';$('#local-note').hidden=cloud||codex;$('#codex-fields').hidden=!codex;$('#save-settings').hidden=codex;}
 function providerFields(){
  const id=$('#provider').value,c=saved.configs[id]||{};$('#key').value='';$('#key').placeholder=c.hasKey?'输入新 Key 可替换':'粘贴 API Key';
  $('#provider-notice').textContent=Cloud.providers[id].notice||'';$('#provider-notice').hidden=!Cloud.providers[id].notice;
@@ -15,7 +15,7 @@ function providerFields(){
 }
 function clearResult(){ $('#preview').hidden=true;$('#preview').removeAttribute('src');$('#download').hidden=true;$('#download').removeAttribute('href');}
 async function save(){
- const mode=$('#mode').value;if(mode==='cloud'&&!$('#consent').checked)throw Error('请先确认原图上传和云端计费说明');
+ const mode=$('#mode').value;if(mode==='codex')throw Error('请点击「连接 Codex」');if(mode==='cloud'&&!$('#consent').checked)throw Error('请先确认原图上传和云端计费说明');
  if(mode==='local')await LocalSettings.save();
  saved=await send({type:'cloud-save',config:{mode,provider:$('#provider').value,key:$('#key').value,model:$('#model').value,workspace:$('#workspace').value.trim(),region:$('#region').value}});
  $('#key').value='';$('#first-use-note').hidden=true;providerFields();return saved;
@@ -25,6 +25,9 @@ $('#mode').onchange=()=>{$('#first-use-note').hidden=true;$('#notice').textConte
 $('#provider').onchange=()=>{providerFields();clearResult();$('#notice').textContent='';};
 for(const id of ['key','region','workspace','model'])$('#'+id).addEventListener('input',()=>{$('#verification').textContent='配置已更改，保存后需要重新验证';clearResult();});
 $('#settings').onsubmit=e=>{e.preventDefault();action(async()=>{await save();$('#notice').textContent=saved.mode==='cloud'?'已启用云端生成，可能产生费用。':'已保存本地配置。';});};
+$('#codex-connect').onclick=()=>action(async()=>{
+ await send({type:'codex-connect'});saved.mode='codex';$('#notice').textContent='已连接 · 本机 Codex';$('#first-use-note').hidden=true;
+});
 $('#local-check').onclick=()=>action(async()=>{$('#notice').textContent='';await LocalSettings.check();});
 $('#check').onclick=()=>action(async()=>{await save();const r=await send({type:'cloud-check'});$('#notice').textContent=r.message;});
 $('#forget').onclick=()=>action(async()=>{saved=await send({type:'cloud-forget',provider:$('#provider').value});$('#mode').value=saved.mode;providerFields();visibility();clearResult();$('#notice').textContent=saved.mode==='local'?'密钥已删除，当前为本地模式。':'密钥已删除。';});
@@ -40,4 +43,5 @@ Promise.all([send({type:'cloud-load'}),chrome.storage.local.get(['generationMode
  const firstUse=!local.generationMode&&!local.token&&!Object.values(r.configs).some(c=>c.hasKey);
  saved=r;$('#mode').value=firstUse?'cloud':r.mode;$('#first-use-note').hidden=!firstUse;
  $('#provider').value=r.provider;$('#consent').checked=!firstUse&&r.mode==='cloud';providerFields();visibility();
+ if(r.mode==='codex')$('#notice').textContent='已选择本机 Codex，可点击重新检查登录。';
 }).catch(e=>{$('#fields').disabled=true;$('#notice').textContent=e.message;});

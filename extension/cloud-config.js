@@ -42,8 +42,8 @@ globalThis.CloudConfig = (() => {
   async function forget(provider) {
     if(!Object.hasOwn(Cloud.providers,provider))throw Error('供应商无效');
     await access(provider,undefined,true);
-    const {cloudProvider}=await chrome.storage.local.get('cloudProvider');
-    if(cloudProvider===provider)await chrome.storage.local.set({generationMode:'local',cloudVerified:false});
+    const {generationMode,cloudProvider}=await chrome.storage.local.get(['generationMode','cloudProvider']);
+    if(generationMode==='cloud' && cloudProvider===provider)await chrome.storage.local.set({generationMode:'local',cloudVerified:false});
     return publicConfig();
   }
   return {publicConfig,save,active,verified,forget};

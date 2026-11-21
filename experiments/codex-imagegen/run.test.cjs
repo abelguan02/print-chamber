@@ -73,7 +73,7 @@ test('dry probes stop before thread creation, paginate and omit account metadata
   assert.equal(checks.ready, false);
 });
 
-async function turnFixture(t, handler, timeoutMs) {
+async function turnFixture(t, handler, timeoutMs, directImage = false) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pc-rpc-fixture-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const outputDir = path.join(root, 'out');
@@ -96,7 +96,7 @@ async function turnFixture(t, handler, timeoutMs) {
   };
   const promise = runTurn({
     client, listen: cb => { notify = cb; }, record, source: { id: 1, sha256: 'b'.repeat(64) },
-    prompt: ' G3\n', model: 'sample', tempRoot: root, cwd: root, outputDir, timeoutMs,
+    prompt: ' G3\n', model: 'sample', tempRoot: root, cwd: root, outputDir, timeoutMs, directImage,
   });
   return { record, calls, outputDir, promise };
 }
@@ -128,6 +128,21 @@ test('a reference, an image event, real pixels and a matching turn produce a por
   assert.equal(results.findings.length, 7);
   assert.equal(results.findings[1].produced, 1);
   assert.match(await fs.readFile(path.join(outputDir, 'comparison.html'), 'utf8'), /1-codex\.png/);
+});
+
+test('direct Codex printing accepts the first tool completion without another model turn', {skip: process.platform !== 'darwin'}, async t => {
+  const {record,promise,calls}=await turnFixture(t,(_method,params,notify)=>{
+    const [text,image]=params.input;
+    assert.ok(text.text.includes(JSON.stringify([image.path])));
+    assert.ok(text.text.endsWith(' G3\n'));
+    notify('item/completed',{threadId:'T',turnId:'U',item:{
+      id:'image-1',type:'imageGeneration',status:'completed',result:tinyPng,inputImages:[{sha256:'b'.repeat(64)}],
+    }});
+    return {turn:{id:'U'}};
+  },5000,true);
+  await promise;
+  assert.equal(record.status,'success');
+  assert.deepEqual(calls,['thread/start','turn/start']);
 });
 
 test('a generated image with a different input hash fails the source check', {

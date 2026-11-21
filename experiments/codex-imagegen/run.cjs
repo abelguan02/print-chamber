@@ -189,10 +189,16 @@ function newRecord(source) {
 
 // Only one fresh thread is active. Notifications can precede the turn/start reply.
 async function runTurn({ client, listen, record, source, prompt, model, tempRoot, cwd, outputDir,
-  inputPath = path.join(outputDir, record.sourceImage), allowedImageRoots, singleAttempt = false, timeoutMs = TURN_MS }) {
+  inputPath = path.join(outputDir, record.sourceImage), allowedImageRoots, singleAttempt = false, directImage = false, timeoutMs = TURN_MS }) {
+  let developerInstructions;
+  if (directImage) {
+    developerInstructions = 'Call image_gen.imagegen directly, exactly once. Pass the attached original’s absolute path in referenced_image_paths and the supplied G3 text as the prompt. Stop on success or failure. Do not retry or use other tools.';
+  } else if (singleAttempt) {
+    developerInstructions = '图片生成工具最多调用一次。成功、失败或未返回图片时均结束本轮，禁止重试或改用其他工具。';
+  }
   const thread = await client.request('thread/start', {
     cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true, modelProvider: 'openai', model,
-    ...(singleAttempt && { developerInstructions: '图片生成工具最多调用一次。成功、失败或未返回图片时均结束本轮，禁止重试或改用其他工具。' }),
+    ...(developerInstructions && { developerInstructions }),
   });
   if (thread.approvalPolicy !== 'never' || thread.sandbox?.type !== 'readOnly' ||
       thread.sandbox.networkAccess === true || thread.modelProvider !== 'openai') {
@@ -246,6 +252,12 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
     if (record.firstEventMs === null) record.firstEventMs = Math.round(performance.now() - start);
     const item = params.item;
     if (method === 'item/started' || method === 'item/completed') observeImage(item, method === 'item/completed');
+    if (directImage && method === 'item/completed' && item?.type === 'imageGeneration') {
+      terminalTime = performance.now();
+      acceptingEvents = false;
+      finished();
+      return;
+    }
     if (method === 'item/agentMessage/delta') {
       texts.set(params.itemId, Array.from((texts.get(params.itemId) ?? '') + params.delta).slice(0, 500).join(''));
     } else if (method === 'item/completed' && item?.type === 'agentMessage') {
@@ -275,7 +287,7 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
     record.attempted = true;
     const submit = client.request('turn/start', {
       threadId, input: [
-        { type: 'text', text: INSTRUCTION + '\n\n' + prompt },
+        { type: 'text', text: (directImage ? 'Use image_gen.imagegen with referenced_image_paths=' + JSON.stringify([inputPath]) + '. Follow this exact G3 prompt:' : INSTRUCTION) + '\n\n' + prompt },
         { type: 'localImage', path: inputPath },
       ],
     }, timeoutMs + 1000).then(response => {
@@ -287,7 +299,7 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
     ]);
     if (terminalTime - start >= timeoutMs) throw new Error('单张超过 5 分钟');
     if (completedImage) Object.assign(record, collectImage(completedImage, tempRoot, outputDir, source.id, source.sha256, allowedImageRoots));
-    if (record.turnStatus !== 'completed') throw new Error('turn/completed: ' + record.turnStatus +
+    if (!(directImage && completedImage) && record.turnStatus !== 'completed') throw new Error('turn/completed: ' + record.turnStatus +
       (record.turnErrorCode ? ' (' + record.turnErrorCode + ')' : ''));
     if (!record.imageToolCalled) {
       const note = record.terminalItemsView === 'full' ? '' : '。会话结束时未提供完整条目，无法确认工具是否运行';
@@ -584,4 +596,4 @@ if (require.main === module) {
     .catch(error => { console.error(error.message); process.exitCode = 1; });
 }
 
-module.exports = { INSTRUCTION, modeFrom, preflight, runTurn };
+module.exports = { INSTRUCTION, SERVER_ARGS, modeFrom, confirmChatgpt, preflight, runTurn };

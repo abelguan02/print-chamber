@@ -1,8 +1,20 @@
 const $=s=>document.querySelector(s);
 let activeTab, currentHost='', supported=false;
-let cloudMode=false,cloudVerified=false;
+let codexMode=false,cloudMode=false,cloudVerified=false;
 const settingsLink=document.createElement('a');settingsLink.href='settings.html';settingsLink.target='_blank';settingsLink.textContent='生成设置';settingsLink.style.cssText='display:block;text-align:center;margin:12px;font-size:12px;color:#766B5A';document.body.append(settingsLink);
 const aboutLink=document.createElement('a');aboutLink.href='about.html';aboutLink.target='_blank';aboutLink.textContent='关于 Print Chamber';aboutLink.style.cssText='display:block;text-align:center;margin:12px;font-size:11px;color:#766B5A';document.body.append(aboutLink);
+const codexConnect=document.createElement('button');
+codexConnect.type='button';codexConnect.id='codex-connect';codexConnect.textContent='连接 Codex';
+codexConnect.title='检查本机已有登录并设为生成方式。点击作品上的打印后才会发送原画。';
+document.body.insertBefore(codexConnect,settingsLink);
+codexConnect.onclick=async()=>{
+ codexConnect.disabled=true;note('正在检查本机 Codex 登录…');
+ try {
+  const result=await chrome.runtime.sendMessage({type:'codex-connect'});
+  if(!result?.connected)throw Error(result?.error||'无法连接本机 Codex');
+  await load();note('已连接 · 本机 Codex');
+ }catch(error){note(error.message);}finally{codexConnect.disabled=false;}
+};
 const setup=$('#setup'),dashboard=$('#dashboard'),status=$('#status');
 // Keep the existing panel shell; all configuration now lives in settings.html.
 $('#token').parentElement.hidden=true;$('#help').parentElement.hidden=true;
@@ -11,8 +23,8 @@ function note(text=''){status.textContent=text;status.hidden=!text}
 function setView(connected){setup.hidden=connected;dashboard.hidden=!connected;settingsLink.hidden=!connected}
 async function load(){
  const saved=await chrome.storage.local.get(['token','enabled','disabledSites','trigger','history','generationMode','cloudVerified']);
- cloudMode=saved.generationMode==='cloud';cloudVerified=!!saved.cloudVerified;
- setView(cloudMode||Boolean(saved.token));
+ codexMode=saved.generationMode==='codex';cloudMode=saved.generationMode==='cloud';cloudVerified=!!saved.cloudVerified;
+ setView(codexMode||cloudMode||Boolean(saved.token));
  [activeTab]=await chrome.tabs.query({active:true,currentWindow:true});
  try{currentHost=new URL(activeTab?.url).hostname}catch{}
  supported=/^https:\/\/([^/]+\.)?(artstation\.com|behance\.net|pinterest\.com)\//.test(activeTab?.url||'')||(activeTab?.url||'').startsWith('http://127.0.0.1:8877/');
@@ -23,12 +35,12 @@ async function load(){
  for(const record of history.slice(0,4)){const link=document.createElement('a');link.href='gallery.html#'+encodeURIComponent(record.id);link.target='_blank';link.title=record.title;const img=document.createElement('img');img.src=record.image;img.alt='查看打印记录';link.append(img);$('#recent').append(link)}
  if(!history.length){const p=document.createElement('span');p.className='empty';p.textContent='打印过的作品会出现在这里';$('#recent').append(p)}
  const today=history.filter(r=>new Date(r.createdAt).toDateString()===new Date().toDateString()).length;
- if(cloudMode||saved.token)await check(saved.token,today);else note();
- if(supported&&(cloudMode||saved.token))await activate(false);
+ if(codexMode||cloudMode||saved.token)await check(saved.token,today);else note();
+ if(supported&&(codexMode||cloudMode||saved.token))await activate(false);
 }
 async function check(token,today=0){
  let label='OFFLINE',detail='MODEL OFF',color='#FF5A48';
- if(cloudMode){
+ if(codexMode){label='CODEX';detail='LOCAL CODEX';color='#F4B53A';setView(true);note('已选择本机 Codex · 点打印后使用账号额度');}else if(cloudMode){
   label='CLOUD';detail=cloudVerified?'API TESTED':'UNVERIFIED';color=cloudVerified?'#7BE07B':'#F4B53A';setView(true);note(cloudVerified?'云端模式 · 此配置曾生成成功，当前连通性未检查':'云端模式 · 尚未真实生成验证，请打开生成设置');
  }else{
  try{

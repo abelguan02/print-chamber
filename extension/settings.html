@@ -2,8 +2,12 @@
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>生成设置 · Print Chamber</title><link rel="icon" href="icons/icon-32.png"><link rel="stylesheet" href="settings.css"></head>
 <body><main><header><span>PRINT CHAMBER</span><h1>生成设置</h1></header>
 <form id="settings"><fieldset id="fields">
-<label for="mode">生成方式</label><select id="mode"><option value="cloud">云端 API（推荐）</option><option value="local">本地模型（进阶）</option></select>
+<label for="mode">生成方式</label><select id="mode"><option value="cloud">云端 API（推荐）</option><option value="codex">本机 Codex</option><option value="local">本地模型（进阶）</option></select>
 <p id="first-use-note" hidden>尚未保存配置</p>
+<section id="codex-fields" hidden>
+<p>使用这台 Mac 上已有的 Codex 登录。点击作品上的「打印」后，原画会发送给 OpenAI，并使用你的 Codex 额度。</p>
+<button id="codex-connect" type="button">连接 Codex</button>
+</section>
 <section id="local-note">
 <p>需要另行安装模型、运行环境、本地服务和菜单栏小助手（Apple Silicon Mac）。插件不附带这些内容，暂无一键安装包。</p>
 <details><summary>首次连接指南</summary><ol><li>准备 FLUX.2 Klein 4B 模型及本地环境，打开菜单栏小助手，点击“启动模型”。</li><li>点击小助手中的“复制插件连接码”，将这台电脑的连接码粘贴到下方。</li><li>测试连接，确认已就绪后保存，即可到作品页打印。</li></ol><p>保存不会启动模型；本地服务关闭后，需要从小助手重新启动。没有本地环境可以选择云端 API。</p></details>
