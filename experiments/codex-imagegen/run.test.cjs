@@ -10,6 +10,10 @@ const { writeReport } = require('./report.cjs');
 
 test('default is dry and ambiguous or out-of-range options fail before launching', () => {
   assert.deepEqual(modeFrom([]), modeFrom(['--dry-run']));
+  assert.deepEqual(modeFrom(['--check-existing-login']), { name: 'check-existing-login', count: 0 });
+  for (const other of ['--limit', '--all', '--login-check', '--dry-run']) {
+    assert.throws(() => modeFrom(['--check-existing-login', other]));
+  }
   assert.deepEqual(modeFrom(['--limit', '1']), { name: 'limit', count: 1 });
   assert.deepEqual(modeFrom(['--login-check']), { name: 'login-check', count: 0 });
   assert.deepEqual(modeFrom(['--login-first-image']), { name: 'login-first-image', count: 1 });
@@ -190,18 +194,30 @@ test('the default dry run stops before handshake when the generation launcher is
 });
 
 test('daily sessions reconnect to the same profile and stop immediately if either connection lacks a login', async t => {
-  for (const accounts of [['chatgpt', 'chatgpt'], ['chatgpt', null], [null]]) {
+  const normalCases = [['chatgpt', 'chatgpt'], ['chatgpt', null], [null]];
+  const testCases = [
+    ...normalCases.map(accounts => ({ accounts, loginOnly: false })),
+    ...[...normalCases, ['apiKey'], ['chatgpt', 'disconnect'], ['cancel']].map(accounts => ({ accounts, loginOnly: true })),
+  ];
+  for (const { accounts, loginOnly } of testCases) {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pc-session-reuse-')));
     t.after(() => fs.rm(root, { recursive: true, force: true }));
     const dir = path.join(root, 'experiments', 'codex-imagegen');
     await fs.mkdir(dir, { recursive: true });
     await fs.copyFile(path.join(__dirname, 'run.cjs'), path.join(dir, 'run.cjs'));
-    for (const file of ['image.cjs', 'client.cjs', 'report.cjs', 'login-check.cjs']) {
+    for (const file of ['image.cjs', 'client.cjs', 'login-check.cjs']) {
       await fs.symlink(path.join(__dirname, file), path.join(dir, file));
     }
     const cli = path.join(root, 'codex');
     const trace = path.join(root, 'methods');
     await fs.writeFile(trace, '');
+    if (loginOnly) {
+      await fs.writeFile(path.join(dir, 'report.cjs'), `
+        exports.loadDataset = async () => { require('node:fs').appendFileSync(${JSON.stringify(trace)}, '{"method":"dataset"}\\n'); };
+      `);
+    } else {
+      await fs.symlink(path.join(__dirname, 'report.cjs'), path.join(dir, 'report.cjs'));
+    }
     await fs.writeFile(cli, '#!' + process.execPath + '\n' + `
       const fs = require('node:fs');
       const file = ${JSON.stringify(trace)};
@@ -212,32 +228,37 @@ test('daily sessions reconnect to the same profile and stop immediately if eithe
         const previous = fs.readFileSync(file, 'utf8').trim().split('\\n').filter(Boolean).map(JSON.parse);
         const type = ${JSON.stringify(accounts)}[previous.filter(r => r.method === 'start').length];
         const methods = {
-          initialize: {}, 'account/read': {account: type ? {type, email:'unused@example.invalid'} : null},
+          initialize: {}, 'account/read': {account: type ? {type:type === 'cancel' ? 'chatgpt' : type, email:'unused@example.invalid'} : null},
           'experimentalFeature/list': {data:[{name:'image_generation',enabled:true}]},
           'modelProvider/capabilities/read': {imageGeneration:true},
           'model/list': {data:[{model:'fixture', inputModalities:['image']}]}, 'account/rateLimits/read': {},
         };
         log({method:'start', profile:process.env.CODEX_HOME, cwd:process.cwd(), args:process.argv.slice(2)});
-        process.on('exit', () => log({method:'end'}));
+        process.on('exit', () => {
+          log({method:'end'});
+          if (type === 'cancel') process.kill(process.ppid, 'SIGTERM');
+        });
         require('node:readline').createInterface({input:process.stdin}).on('line', line => {
           const {id, method, params} = JSON.parse(line);
           log({method});
           if (method === 'initialized') return;
           if (!Object.hasOwn(methods, method)) process.exit(8);
-          if (method === 'account/read' && Object.keys(params).length) process.exit(9);
+          if (method === 'account/read' && (params.refreshToken !== false || Object.keys(params).length !== 1)) process.exit(9);
+          if (method === 'account/read' && type === 'disconnect') process.exit(3);
           console.log(JSON.stringify({id, result:methods[method]}));
         });
       } else process.exit(7);
     `, { mode: 0o700 });
     await fs.writeFile(path.join(dir, 'desktop-cli.cjs'), `exports.findDesktopCli = async () => ${JSON.stringify(cli)};`);
     await fs.writeFile(path.join(dir, 'isolation.cjs'), `
-      exports.isolateGeneration = async (_root, env, cli) => {
+      exports.${loginOnly ? 'isolateLoginCheck' : 'isolateGeneration'} = async (_root, env, cli) => {
         if (cli !== ${JSON.stringify(cli)}) throw new Error('unexpected executable');
         return env;
       };
     `);
     const profile = path.join(root, 'existing-user');
-    const result = require('node:child_process').spawnSync(process.execPath, [path.join(dir, 'run.cjs')], {
+    const flags = loginOnly ? ['--check-existing-login'] : [];
+    const result = require('node:child_process').spawnSync(process.execPath, [path.join(dir, 'run.cjs'), ...flags], {
       cwd: root, encoding: 'utf8', timeout: 8000,
       env: { PATH: root, HOME: root, CODEX_HOME: profile, TMPDIR: root, PRINT_CHAMBER_G3_DIR: root },
     });
@@ -245,12 +266,24 @@ test('daily sessions reconnect to the same profile and stop immediately if eithe
     assert.equal(result.status, verified ? 0 : 1, result.stderr);
     const [reportDir] = await fs.readdir(path.join(root, 'output'));
     const report = JSON.parse(await fs.readFile(path.join(root, 'output', reportDir, 'results.json')));
-    assert.equal(report.environment.codexExecutable, cli);
     assert.equal(report.environment.codexSource, 'chatgpt-desktop-bundle');
     assert.equal(report.existingLogin.verified, verified);
-    assert.equal(report.preflight.ready, verified);
-    assert.equal(report.existingLogin.first.accountType, accounts[0] ?? 'signed-out');
-    assert.equal(report.existingLogin.reconnect.accountType, accounts.length === 2 ? accounts[1] ?? 'signed-out' : null);
+    assert.equal(report.existingLogin.first.accountType, accounts[0] === 'cancel' ? 'chatgpt' : accounts[0] ?? 'signed-out');
+    const reconnectType = accounts.length === 2 && accounts[1] !== 'disconnect' ? accounts[1] ?? 'signed-out' : null;
+    assert.equal(report.existingLogin.reconnect.accountType, reconnectType);
+    if (loginOnly) {
+      assert.equal(report.existingLogin.first.started, true);
+      assert.equal(report.existingLogin.reconnect.started, accounts.length === 2);
+      assert.equal(report.submitted, 0);
+      assert.equal(report.preflight, undefined);
+      assert.equal(report.records, undefined);
+      assert.deepEqual(await fs.readdir(path.join(root, 'output', reportDir)), ['results.json']);
+      if (accounts.length === 1) assert.match(result.stdout, /重连 未进行/);
+    } else {
+      assert.equal(report.environment.codexExecutable, cli);
+      assert.equal(report.preflight.ready, verified);
+      assert.deepEqual(report.records, []);
+    }
     const entries = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
     const starts = entries.filter(e => e.method === 'start');
     assert.equal(starts.length, accounts.length);
@@ -260,10 +293,9 @@ test('daily sessions reconnect to the same profile and stop immediately if eithe
     const handshake = ['start', 'initialize', 'initialized', 'account/read'];
     const expected = [...handshake, 'end'];
     if (accounts.length === 2) expected.push(...handshake);
-    if (verified) expected.push('experimentalFeature/list', 'modelProvider/capabilities/read', 'model/list', 'account/rateLimits/read');
+    if (verified && !loginOnly) expected.push('experimentalFeature/list', 'modelProvider/capabilities/read', 'model/list', 'account/rateLimits/read');
     if (accounts.length === 2) expected.push('end');
     assert.deepEqual(methods, expected);
-    assert.deepEqual(report.records, []);
     assert.ok(!JSON.stringify(report).includes('unused@example.invalid'));
   }
 });

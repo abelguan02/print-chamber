@@ -7,7 +7,7 @@ const { execFileSync } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
 const { AppServerClient } = require('./client.cjs');
 const { loadDataset, prepareSample, writeReport } = require('./report.cjs');
-const { isolateGeneration } = require('./isolation.cjs');
+const { isolateGeneration, isolateLoginCheck } = require('./isolation.cjs');
 const { findDesktopCli } = require('./desktop-cli.cjs');
 const { collectImage } = require('./image.cjs');
 const { temporaryLoginEnvironment, loginInTerminal } = require('./login-check.cjs');
@@ -31,13 +31,14 @@ const SERVER_ARGS = [
 
 function modeFrom(args) {
   if (!args.length || (args.length === 1 && args[0] === '--dry-run')) return { name: 'dry-run', count: 0 };
+  if (args.length === 1 && args[0] === '--check-existing-login') return { name: 'check-existing-login', count: 0 };
   if (args.length === 1 && args[0] === '--login-check') return { name: 'login-check', count: 0 };
   if (args.length === 1 && args[0] === '--login-first-image') return { name: 'login-first-image', count: 1 };
   if (args.length === 1 && args[0] === '--all') return { name: 'all', count: 5 };
   if (args.length === 2 && args[0] === '--limit' && /^[1-5]$/.test(args[1])) {
     return { name: 'limit', count: Number(args[1]) };
   }
-  throw new Error('请选择 --dry-run、--login-check、--login-first-image、--limit 1 至 5 或 --all，各模式不能混用。');
+  throw new Error('请选择 --dry-run、--check-existing-login、--login-check、--login-first-image、--limit 1 至 5 或 --all，各模式不能混用。');
 }
 
 function childEnvironment(tempRoot) {
@@ -109,7 +110,7 @@ async function confirmChatgpt(client, checks, failureModes) {
   await handshake(client);
   checks.handshake = true;
   let response;
-  try { response = await client.request('account/read', {}); }
+  try { response = await client.request('account/read', { refreshToken: false }); }
   catch (error) { throw new Error('无法确认已有登录，已停止（' + error.message + '）。'); }
   const account = response?.account;
   checks.accountType = account === null ? 'signed-out' :
@@ -259,6 +260,7 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
 
 async function run(mode) {
   const loginCheck = mode.name === 'login-check';
+  const existingLoginOnly = mode.name === 'check-existing-login';
   const firstImage = mode.name === 'login-first-image';
   const temporaryLogin = loginCheck || firstImage;
   if (temporaryLogin && (!process.stdin.isTTY || !process.stdout.isTTY)) {
@@ -266,7 +268,8 @@ async function run(mode) {
   }
   const outputParent = path.join(ROOT, 'output');
   await fs.mkdir(outputParent, { recursive: true });
-  const outputDir = await fs.mkdtemp(path.join(outputParent, 'codex-imagegen-' +
+  const outputPrefix = existingLoginOnly ? 'codex-existing-login-' : 'codex-imagegen-';
+  const outputDir = await fs.mkdtemp(path.join(outputParent, outputPrefix +
     new Date().toISOString().replace(/[:.]/g, '-') + '-'));
   const results = {
     mode: mode.name, requestedSamples: mode.count, environment: {
@@ -275,7 +278,8 @@ async function run(mode) {
     preflight: { handshake: false, ready: false, issues: {} }, failureModes: {}, records: [],
   };
   if (!temporaryLogin) results.existingLogin = {
-    first: { handshake: false, accountType: null }, reconnect: { handshake: false, accountType: null }, verified: false,
+    first: { started: false, handshake: false, accountType: null },
+    reconnect: { started: false, handshake: false, accountType: null }, verified: false,
   };
   let client, listener, tempRoot, dataset, datasetDir, activeCheck;
   const cancellation = new AbortController();
@@ -287,7 +291,7 @@ async function run(mode) {
   process.on('SIGTERM', cancel);
   function listen(callback) { listener = callback; }
   try {
-    if (!loginCheck) {
+    if (!loginCheck && !existingLoginOnly) {
       try {
         datasetDir = await findDataset();
         dataset = await loadDataset(datasetDir);
@@ -316,7 +320,8 @@ async function run(mode) {
     const cliPath = await findDesktopCli();
     results.environment.codexSource = 'chatgpt-desktop-bundle';
     results.environment.codexExecutable = cliPath;
-    const env = await isolateGeneration(tempRoot, baseEnv, cliPath);
+    const isolate = existingLoginOnly ? isolateLoginCheck : isolateGeneration;
+    const env = await isolate(tempRoot, baseEnv, cliPath);
     results.environment.codexVersion = execFileSync('codex', ['--version'], {
       cwd, env, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
@@ -337,15 +342,18 @@ async function run(mode) {
     } else {
       activeCheck = results.existingLogin.first;
       client = startServer();
+      activeCheck.started = true;
       await confirmChatgpt(client, activeCheck, results.failureModes);
       await client.close();
       client = null;
     }
     cancellation.signal.throwIfAborted();
-    activeCheck = results.preflight;
+    activeCheck = existingLoginOnly ? results.existingLogin.reconnect : results.preflight;
     client = startServer();
     results.serverPid = client.pid;
-    await preflight(client, results.preflight, results.failureModes);
+    if (results.existingLogin) results.existingLogin.reconnect.started = true;
+    if (existingLoginOnly) await confirmChatgpt(client, activeCheck, results.failureModes);
+    else await preflight(client, results.preflight, results.failureModes);
     let quotaBlocked = results.preflight.rateLimits?.ordinaryUsageAllowed === false;
     for (const record of results.records) {
       if (record.error) continue;
@@ -381,7 +389,11 @@ async function run(mode) {
       if (record.rateLimitsAfter?.ordinaryUsageAllowed === false) quotaBlocked = true;
     }
   } catch (error) {
-    if (!activeCheck?.handshake && error.code === 'APP_SERVER_EXITED') {
+    if (existingLoginOnly && cancellation.signal.aborted) {
+      results.error = '已取消登录检查。';
+    } else if (existingLoginOnly && !activeCheck?.handshake && error.code === 'APP_SERVER_EXITED') {
+      results.error = 'Codex 在查询账号前退出（' + error.message + '）。';
+    } else if (!activeCheck?.handshake && error.code === 'APP_SERVER_EXITED') {
       results.preflight.issues.startup = error.message;
       results.error = 'Codex 在出图隔离条件下未完成握手就退出了（' + error.message + '）。未提交图片。';
     } else {
@@ -394,17 +406,33 @@ async function run(mode) {
       if (tempRoot) await fs.rm(tempRoot, { recursive: true, force: true });
     } finally {
       if (results.existingLogin) {
-        const { handshake, accountType } = results.preflight;
-        results.existingLogin.reconnect = { handshake, accountType: accountType ?? null };
-        results.existingLogin.verified = results.existingLogin.first.accountType === 'chatgpt' && accountType === 'chatgpt';
+        const { first, reconnect } = results.existingLogin;
+        if (!existingLoginOnly) {
+          reconnect.handshake = results.preflight.handshake;
+          reconnect.accountType = results.preflight.accountType ?? null;
+        }
+        results.existingLogin.verified = !cancellation.signal.aborted &&
+          first.accountType === 'chatgpt' && reconnect.accountType === 'chatgpt';
       }
       process.off('SIGINT', cancel);
       process.off('SIGTERM', cancel);
-      await writeReport(outputDir, results);
+      if (existingLoginOnly) {
+        const { codexSource, codexVersion } = results.environment;
+        const report = { mode: mode.name, environment: { codexSource, codexVersion },
+          existingLogin: results.existingLogin, submitted: 0, error: results.error ?? null };
+        await fs.writeFile(path.join(outputDir, 'results.json'), JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
+      } else await writeReport(outputDir, results);
     }
   }
   console.log('报告 ' + outputDir);
   if (results.error) console.error(results.error);
+  if (existingLoginOnly) {
+    const accountLabels = { chatgpt: 'ChatGPT 已登录', 'signed-out': '未登录', apiKey: 'API Key' };
+    const status = check => check.started ? accountLabels[check.accountType] ?? '未确认' : '未进行';
+    const { first, reconnect, verified } = results.existingLogin;
+    console.log('已有登录：首次 ' + status(first) + '，重连 ' + status(reconnect) + '，已提交 0 张。');
+    return !results.error && verified;
+  }
   if (loginCheck) {
     const ok = !cancellation.signal.aborted && !results.error && results.preflight.ready;
     console.log((ok ? '临时登录预检通过' : '临时登录预检未通过') + '，已提交 0 张。');

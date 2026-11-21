@@ -6,15 +6,12 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 
 const seatbelt = '/usr/bin/sandbox-exec';
-const profile = `(version 1)
-(allow default)
-(deny file-write*)
+const execRules = `(deny process-exec)
+(allow process-exec (literal (param "CLI")))`;
+const generationRules = `(deny file-write*)
 (allow file-write* (subpath (param "RUN_DIR")))
 (allow file-write-data (literal "/dev/null"))
-(deny process-fork)
-(deny process-exec)
-(allow process-exec (literal (param "CLI")))
-`;
+(deny process-fork)`;
 
 function shellQuote(value) {
   return "'" + value.replaceAll("'", "'\\''") + "'";
@@ -32,13 +29,14 @@ async function verifyOfficialCodex(cli) {
   }
 }
 
-async function isolateGeneration(tempRoot, baseEnv, cli, verify = verifyOfficialCodex) {
+async function createLauncher(tempRoot, baseEnv, cli, verify, extraRules) {
   if (process.platform !== 'darwin') {
-    throw new Error('Generation requires the macOS sandbox to restrict app-server writes and child commands');
+    throw new Error('本机 Codex 启动器需要 macOS。');
   }
   const runDir = await fs.realpath(tempRoot);
   const binDir = await fs.mkdtemp(path.join(runDir, 'launcher-'));
-  const file = path.join(binDir, 'generation.sb');
+  const file = path.join(binDir, 'launcher.sb');
+  const profile = ['(version 1)', '(allow default)', extraRules, execRules, ''].join('\n');
   await fs.writeFile(file, profile, { mode: 0o600 });
   const policy = executable => ['-D', 'RUN_DIR=' + runDir, '-D', 'CLI=' + executable, '-f', file, executable];
   try {
@@ -46,7 +44,9 @@ async function isolateGeneration(tempRoot, baseEnv, cli, verify = verifyOfficial
       cwd: runDir, env: { PATH: '/usr/bin:/bin' }, timeout: 5000,
     });
   } catch {
-    throw new Error('macOS process isolation unavailable：无法启用本次进程的写入限制，已在启动 Codex 服务前停止。');
+    throw Object.assign(new Error('macOS 未能启用本次启动所需的进程权限限制，Codex 服务尚未启动。'), {
+      code: 'PROCESS_ISOLATION_UNAVAILABLE',
+    });
   }
   await verify(cli);
   const script = [
@@ -59,4 +59,13 @@ async function isolateGeneration(tempRoot, baseEnv, cli, verify = verifyOfficial
   return { ...baseEnv, PATH: binDir + path.delimiter + baseEnv.PATH };
 }
 
-module.exports = { isolateGeneration };
+function isolateGeneration(tempRoot, baseEnv, cli, verify = verifyOfficialCodex) {
+  return createLauncher(tempRoot, baseEnv, cli, verify, generationRules);
+}
+
+function isolateLoginCheck(tempRoot, baseEnv, cli, verify = verifyOfficialCodex) {
+  // The account-only client lets the signed service maintain its normal state.
+  return createLauncher(tempRoot, baseEnv, cli, verify, '');
+}
+
+module.exports = { isolateGeneration, isolateLoginCheck };
