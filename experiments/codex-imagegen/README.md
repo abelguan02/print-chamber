@@ -2,7 +2,13 @@
 
 用本机 Codex 的 ChatGPT 登录，在独立会话里按 Print Chamber 的 G3 原文重绘一张原画。默认在出图使用的 macOS 隔离条件下检查启动、协议和账号状态。单图成功率、耗时和额度来自实际发出的请求；视觉还原程度需要看三列对比图。
 
-## 首图实机结果（本次授权已结束）
+## 首图重绘已通过一次实机验证
+
+2026-11-21，新的单次授权下，本机桌面 Codex `0.171.0-alpha.13` 复用已有 ChatGPT 登录，以 `gpt-6.2-sol` 发送一次 G3 原文及清单第 1 张原画。启动参数将 `features.code_mode` 设为 `{enabled=false,direct_only_tool_namespaces=["image_gen"]}`，开启 `features.image_generation`，关闭 `features.omit_app_server_notification_media`。在只读临时会话中显式指定 `image_gen.imagegen`，用 `localImage` 附图，并在指令中提供该图对应的 `referenced_image_paths`。G3 原文和原画均在提交前通过 SHA-256 校验。
+
+工具调用 1 次并返回 `completed`，其参考图指纹与清单第 1 张原画一致。收到有效图片即关闭连接，耗时 43.4 秒。返回的 PNG 可完整解码，尺寸为 1778 × 884。图片与回执位于本地 `output/codex-g3-first-direct-20261121-once/`。仅这一次、这张原画通过验证，风格还原程度由用户看图确认。下方保留之前的试验结果；两次的调用方式有多处差异，无法据此单独确定上次失败的原因。
+
+## 早期首图实机结果（该次授权已结束）
 
 2026-11-21 05:20（美东），用户在普通终端执行了以下命令一次：
 
@@ -22,7 +28,7 @@ node experiments/codex-imagegen/run.cjs --first-image-once
 
 ### 同版本官方实现与本机资格核查
 
-桌面端所用的 Codex 版本 `0.171.0-alpha.13` 在创建 app-server 的线程时安装内置图片组件，由 Codex 自己管理认证。该版本的官方集成测试在模拟 ChatGPT 登录、无 API Key 的条件下，检查模型能看到 `image_gen__imagegen`，也覆盖调用和编辑随消息提交的参考图。因此 Print Chamber 本机版可以沿用现有 app-server 接口。当前机器上首图未出，仍以先前的实机结果为准。[组件安装](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/app-server/src/extensions.rs#L118-L126) · [工具可见性与调用测试](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/app-server/tests/suite/v2/imagegen_extension.rs#L958-L1077) · [参考图编辑测试](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/app-server/tests/suite/v2/imagegen_extension.rs#L859-L913)
+桌面端所用的 Codex 版本 `0.171.0-alpha.13` 在创建 app-server 的线程时安装内置图片组件，由 Codex 自己管理认证。该版本的官方集成测试在模拟 ChatGPT 登录、无 API Key 的条件下，检查模型能看到 `image_gen__imagegen`，也覆盖调用和编辑随消息提交的参考图。[组件安装](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/app-server/src/extensions.rs#L118-L126) · [工具可见性与调用测试](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/app-server/tests/suite/v2/imagegen_extension.rs#L958-L1077) · [参考图编辑测试](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/app-server/tests/suite/v2/imagegen_extension.rs#L859-L913)
 
 注册工具时，Codex 会检查出图开关、账号方案、供应商出图能力、模型图片输入能力和认证方式。下方离线实验使用空白账号且把供应商设为 `requires_openai_auth=false`，这会使它跳过图片工具。因此那 21 个函数只能说明空白模拟环境的情况。针对已有登录的补查只调用账号、供应商、功能和模型查询接口，未创建线程或提交模型请求。本地记录为 `output/codex-image-registration-fx3xfopq/results.json`。[同版注册条件](https://github.com/openai/codex/blob/581161ab41e643d942e1e1b5f561034060bf18e3/codex-rs/core/src/tools/spec_plan.rs#L821-L855)
 
