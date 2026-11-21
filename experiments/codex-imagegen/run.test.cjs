@@ -124,3 +124,32 @@ test('deadline interrupts only the owned turn and awaits its terminal notificati
   assert.deepEqual(calls, ['thread/start', 'turn/start', 'turn/interrupt']);
   assert.equal(record.turnStatus, 'interrupted');
 });
+
+test('the default dry run stops before handshake when the generation launcher is unavailable', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pc-dry-isolation-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const dir = path.join(root, 'experiments', 'codex-imagegen');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.copyFile(path.join(__dirname, 'run.cjs'), path.join(dir, 'run.cjs'));
+  for (const file of ['image.cjs', 'client.cjs', 'report.cjs']) {
+    await fs.symlink(path.join(__dirname, file), path.join(dir, file));
+  }
+  await fs.writeFile(path.join(dir, 'isolation.cjs'), `
+    exports.cliOnPath = async () => process.execPath;
+    exports.isolateGeneration = async () => { throw new Error('mock isolation refused'); };
+  `);
+  const { spawnSync } = require('node:child_process');
+  const result = spawnSync(process.execPath, [path.join(dir, 'run.cjs')], {
+    cwd: root, encoding: 'utf8', timeout: 5000,
+    env: { PATH: root, HOME: root, TMPDIR: root, PRINT_CHAMBER_G3_DIR: root },
+  });
+  assert.equal(result.status, 1);
+  const [runDir] = await fs.readdir(path.join(root, 'output'));
+  const report = JSON.parse(await fs.readFile(path.join(root, 'output', runDir, 'results.json')));
+  assert.equal(report.mode, 'dry-run');
+  assert.equal(report.error, 'mock isolation refused');
+  assert.equal(report.preflight.ready, false);
+  assert.equal(report.preflight.handshake, false);
+  assert.ok(!report.serverPid);
+  assert.deepEqual(report.records, []);
+});

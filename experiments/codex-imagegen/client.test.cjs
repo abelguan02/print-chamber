@@ -56,11 +56,30 @@ test('times out one request and discards private error data', async t => {
   await assert.rejects(client.request('fail', {}), { message: 'fail failed (RPC -32004)', rpcCode: -32004 });
 });
 
-test('an unexpected exit settles pending operations and the disconnect signal', async t => {
-  const client = await fakeClient(t, 'process.exit(1)');
-  await assert.rejects(client.request('initialize', {}), /app-server/);
-  assert.match((await client.disconnected).message, /app-server/);
+test('startup failure retains the exit code after stdout closes, without relaying stderr', async t => {
+  const client = await fakeClient(t, `
+    console.error('private diagnostics');
+    require('node:fs').closeSync(1);
+    setTimeout(() => process.exit(37), 30);
+  `);
+  await assert.rejects(client.request('initialize', {}), {
+    code: 'APP_SERVER_EXITED', exitCode: 37, signal: null, message: 'app-server exited (exit code 37)',
+  });
+  assert.equal((await client.disconnected).exitCode, 37);
+});
+
+test('termination by signal is reported independently of exit status', async t => {
+  const client = await fakeClient(t, "process.kill(process.pid, 'SIGTERM')");
+  await assert.rejects(client.request('initialize', {}), {
+    code: 'APP_SERVER_EXITED', exitCode: null, signal: 'SIGTERM', message: 'app-server exited (signal SIGTERM)',
+  });
+});
+
+test('a server that closes stdout but keeps running is detected before request timeout', async t => {
+  const client = await fakeClient(t, "require('node:fs').closeSync(1); setInterval(() => {}, 500)");
+  await assert.rejects(client.request('initialize', {}, 3000), { code: 'APP_SERVER_CHANNEL_CLOSED' });
   await client.close();
+  assert.throws(() => process.kill(client.pid, 0), { code: 'ESRCH' });
 });
 
 test('unexpected stdout fails closed without returning its contents', async t => {

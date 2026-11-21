@@ -11,6 +11,7 @@ class AppServerClient {
   #resolveDisconnect;
   #closed;
   #shutdown;
+  #channelTimer;
 
   constructor({ cwd, env, args = [], onNotification = () => {} }) {
     if (!env?.PATH || !cwd) throw new Error('An explicit PATH and working directory are required');
@@ -19,15 +20,19 @@ class AppServerClient {
     this.#child = spawn('codex', ['app-server', ...args], {
       cwd, env, shell: false, stdio: ['pipe', 'pipe', 'ignore'],
     });
-    this.#closed = new Promise(resolve => this.#child.once('close', resolve));
+    this.#closed = new Promise(resolve => this.#child.once('close', (code, signal) => {
+      this.#reportExit(code, signal);
+      resolve();
+    }));
     this.#child.on('error', error => {
       const code = error.code === 'ENOENT' ? ' (executable or cwd missing)' : '';
       this.#disconnect(new Error('Could not run codex app-server' + code));
     });
-    this.#child.stdin.on('error', () => this.#disconnect(new Error('app-server input closed')));
+    this.#child.on('exit', () => this.#waitForClose());
+    this.#child.stdin.on('error', () => this.#waitForClose());
     const lines = createInterface({ input: this.#child.stdout, crlfDelay: Infinity });
-    lines.on('error', () => this.#disconnect(new Error('app-server output failed')));
-    lines.on('close', () => this.#disconnect(new Error('app-server output closed')));
+    lines.on('error', () => this.#waitForClose());
+    lines.on('close', () => this.#waitForClose());
     lines.on('line', line => {
       if (this.#failure) return;
       try {
@@ -64,8 +69,32 @@ class AppServerClient {
 
   get pid() { return this.#child.pid; }
 
+  #reportExit(exitCode, signal) {
+    const reason = signal ? 'signal ' + signal : 'exit code ' + exitCode;
+    this.#disconnect(Object.assign(new Error('app-server exited (' + reason + ')'), {
+      code: 'APP_SERVER_EXITED', exitCode, signal,
+    }));
+  }
+
+  #waitForClose() {
+    if (this.#failure || this.#channelTimer) return;
+    // Drain final protocol messages and allow close to deliver the exit status.
+    // A process can also close stdout and continue running indefinitely.
+    this.#channelTimer = setTimeout(() => {
+      const { exitCode, signalCode } = this.#child;
+      if (exitCode !== null || signalCode !== null) {
+        this.#reportExit(exitCode, signalCode);
+      } else {
+        this.#disconnect(Object.assign(new Error('app-server closed its RPC channel while still running'), {
+          code: 'APP_SERVER_CHANNEL_CLOSED',
+        }));
+      }
+    }, 350);
+  }
+
   #disconnect(error) {
     if (this.#failure) return;
+    clearTimeout(this.#channelTimer);
     this.#failure = error;
     for (const pending of this.#pending.values()) {
       clearTimeout(pending.timer);

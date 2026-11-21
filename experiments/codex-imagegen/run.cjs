@@ -270,7 +270,8 @@ async function run(mode) {
     results.environment.codexVersion = execFileSync(cliPath, ['--version'], {
       cwd, env: baseEnv, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    const env = mode.count ? await isolateGeneration(tempRoot, baseEnv) : baseEnv;
+    // A ready dry run must prove that the *same* confined server can start.
+    const env = await isolateGeneration(tempRoot, baseEnv);
     client = new AppServerClient({ cwd, env, args: SERVER_ARGS, onNotification: (m, p) => listener?.(m, p) });
     results.serverPid = client.pid;
     await preflight(client, results.preflight, results.failureModes);
@@ -306,7 +307,12 @@ async function run(mode) {
       if (record.rateLimitsAfter?.ordinaryUsageAllowed === false) quotaBlocked = true;
     }
   } catch (error) {
-    results.error = error.message;
+    if (!results.preflight.handshake && error.code === 'APP_SERVER_EXITED') {
+      results.preflight.issues.startup = error.message;
+      results.error = 'Codex 在出图隔离条件下未完成握手就退出了（' + error.message + '）。未提交图片。';
+    } else {
+      results.error = error.message;
+    }
     for (const record of results.records) record.error ??= results.error;
   } finally {
     try {
