@@ -9,6 +9,7 @@ const { AppServerClient } = require('./client.cjs');
 const { loadDataset, prepareSample, writeReport } = require('./report.cjs');
 const { isolateGeneration, cliOnPath } = require('./isolation.cjs');
 const { collectImage } = require('./image.cjs');
+const { temporaryLoginEnvironment, loginInTerminal } = require('./login-check.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
 const DATA = 'output/scenes-g3-20261025-060950';
@@ -28,11 +29,12 @@ const SERVER_ARGS = [
 
 function modeFrom(args) {
   if (!args.length || (args.length === 1 && args[0] === '--dry-run')) return { name: 'dry-run', count: 0 };
+  if (args.length === 1 && args[0] === '--login-check') return { name: 'login-check', count: 0 };
   if (args.length === 1 && args[0] === '--all') return { name: 'all', count: 5 };
   if (args.length === 2 && args[0] === '--limit' && /^[1-5]$/.test(args[1])) {
     return { name: 'limit', count: Number(args[1]) };
   }
-  throw new Error('请选择 --dry-run、--limit 1 至 5 或 --all，三者不能混用。');
+  throw new Error('请选择 --dry-run、--login-check、--limit 1 至 5 或 --all，各模式不能混用。');
 }
 
 function childEnvironment(tempRoot) {
@@ -95,9 +97,13 @@ async function readLimits(client) {
   };
 }
 
-async function preflight(client, checks, failureModes) {
+async function handshake(client) {
   await client.request('initialize', { clientInfo: { name: 'print-chamber-spike', title: 'Print Chamber', version: '1.0' } });
   client.notify('initialized');
+}
+
+async function preflight(client, checks, failureModes) {
+  await handshake(client);
   checks.handshake = true;
   // Independent probe failures are useful evidence on offline and signed-out machines.
   const probes = {
@@ -230,6 +236,10 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
 }
 
 async function run(mode) {
+  const temporaryLogin = mode.name === 'login-check';
+  if (temporaryLogin && (!process.stdin.isTTY || !process.stdout.isTTY)) {
+    throw new Error('请在自己的终端窗口运行临时登录预检。');
+  }
   const outputParent = path.join(ROOT, 'output');
   await fs.mkdir(outputParent, { recursive: true });
   const outputDir = await fs.mkdtemp(path.join(outputParent, 'codex-imagegen-' +
@@ -241,20 +251,25 @@ async function run(mode) {
     preflight: { handshake: false, ready: false, issues: {} }, failureModes: {}, records: [],
   };
   let client, listener, tempRoot, dataset, datasetDir;
-  let signalled = false;
-  const cancel = () => { signalled = true; if (client) void client.close(); };
-  process.once('SIGINT', cancel);
-  process.once('SIGTERM', cancel);
+  const cancellation = new AbortController();
+  const cancel = () => {
+    cancellation.abort(new Error('已取消本次运行。'));
+    if (client) void client.close();
+  };
+  process.on('SIGINT', cancel);
+  process.on('SIGTERM', cancel);
   function listen(callback) { listener = callback; }
   try {
-    try {
-      datasetDir = await findDataset();
-      dataset = await loadDataset(datasetDir);
-      results.environment.g3Sha256 = dataset.g3Sha256;
-      if (dataset.g3Sha256 !== G3_SHA256) throw new Error('G3 提示词与已确认版本的 SHA-256 不匹配');
-    } catch (error) {
-      if (mode.count) throw error;
-      results.datasetError = error.message;
+    if (!temporaryLogin) {
+      try {
+        datasetDir = await findDataset();
+        dataset = await loadDataset(datasetDir);
+        results.environment.g3Sha256 = dataset.g3Sha256;
+        if (dataset.g3Sha256 !== G3_SHA256) throw new Error('G3 提示词与已确认版本的 SHA-256 不匹配');
+      } catch (error) {
+        if (mode.count) throw error;
+        results.datasetError = error.message;
+      }
     }
     for (const source of dataset?.sources.slice(0, mode.count) ?? []) {
       const record = newRecord(source);
@@ -265,21 +280,39 @@ async function run(mode) {
     tempRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pc-imagegen-')));
     const cwd = path.join(tempRoot, 'work');
     await fs.mkdir(cwd);
-    const baseEnv = childEnvironment(tempRoot);
+    const baseEnv = temporaryLogin
+      ? await temporaryLoginEnvironment(tempRoot, process.env)
+      : childEnvironment(tempRoot);
     const cliPath = await cliOnPath(baseEnv.PATH, cwd);
     results.environment.codexVersion = execFileSync(cliPath, ['--version'], {
       cwd, env: baseEnv, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
     // A ready dry run must prove that the *same* confined server can start.
     const env = await isolateGeneration(tempRoot, baseEnv);
-    client = new AppServerClient({ cwd, env, args: SERVER_ARGS, onNotification: (m, p) => listener?.(m, p) });
+    const startServer = () => new AppServerClient({
+      cwd, env, args: SERVER_ARGS, onNotification: (method, params) => listener?.(method, params),
+    });
+    cancellation.signal.throwIfAborted();
+    if (temporaryLogin) {
+      results.loginCheck = { startupVerified: false, loginCompleted: false };
+      client = startServer();
+      await handshake(client);
+      results.loginCheck.startupVerified = true;
+      await client.close();
+      client = null;
+      console.log('启动检查通过。请在官方登录页面选择你的 ChatGPT 账号，完成后回到本终端。');
+      await loginInTerminal(cliPath, cwd, baseEnv, cancellation.signal);
+      results.loginCheck.loginCompleted = true;
+    }
+    cancellation.signal.throwIfAborted();
+    client = startServer();
     results.serverPid = client.pid;
     await preflight(client, results.preflight, results.failureModes);
     let quotaBlocked = results.preflight.rateLimits?.ordinaryUsageAllowed === false;
     for (const record of results.records) {
       if (record.error) continue;
       if (quotaBlocked) { record.error = '账号已报告当前额度受限，未提交本张原画。'; continue; }
-      if (!results.preflight.ready || signalled) {
+      if (!results.preflight.ready || cancellation.signal.aborted) {
         record.error = '预检未就绪或已终止，未提交本张原画。';
         continue;
       }
@@ -325,10 +358,15 @@ async function run(mode) {
     }
   }
   console.log('报告 ' + outputDir);
+  if (results.error) console.error(results.error);
+  if (temporaryLogin) {
+    const ok = !cancellation.signal.aborted && !results.error && results.preflight.ready;
+    console.log((ok ? '临时登录预检通过' : '临时登录预检未通过') + '，已提交 0 张。');
+    return ok;
+  }
   console.log('握手 ' + (results.preflight.handshake ? '完成' : '失败') + '，生成预检 ' +
     (results.preflight.ready ? '就绪' : '未就绪') + '，已提交 ' + results.records.filter(r => r.attempted).length + ' 张');
-  if (results.error) console.error(results.error);
-  return !signalled && !results.error && results.preflight.handshake &&
+  return !cancellation.signal.aborted && !results.error && results.preflight.handshake &&
     (!mode.count || results.records.every(r => r.status === 'success'));
 }
 

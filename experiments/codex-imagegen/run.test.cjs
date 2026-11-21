@@ -11,7 +11,8 @@ const { writeReport } = require('./report.cjs');
 test('default is dry and ambiguous or out-of-range options fail before launching', () => {
   assert.deepEqual(modeFrom([]), modeFrom(['--dry-run']));
   assert.deepEqual(modeFrom(['--limit', '1']), { name: 'limit', count: 1 });
-  for (const args of [['--limit', '0'], ['--limit', '6'], ['--all', '--dry-run'], ['--limit']]) {
+  assert.deepEqual(modeFrom(['--login-check']), { name: 'login-check', count: 0 });
+  for (const args of [['--login-check', '--limit', '1'], ['--login-check', '--all'], ['--limit', '0'], ['--limit', '6'], ['--all', '--dry-run'], ['--limit']]) {
     assert.throws(() => modeFrom(args));
   }
 });
@@ -131,7 +132,7 @@ test('the default dry run stops before handshake when the generation launcher is
   const dir = path.join(root, 'experiments', 'codex-imagegen');
   await fs.mkdir(dir, { recursive: true });
   await fs.copyFile(path.join(__dirname, 'run.cjs'), path.join(dir, 'run.cjs'));
-  for (const file of ['image.cjs', 'client.cjs', 'report.cjs']) {
+  for (const file of ['image.cjs', 'client.cjs', 'report.cjs', 'login-check.cjs']) {
     await fs.symlink(path.join(__dirname, file), path.join(dir, file));
   }
   await fs.writeFile(path.join(dir, 'isolation.cjs'), `
