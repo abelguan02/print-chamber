@@ -21,6 +21,7 @@ test('default is dry and ambiguous or out-of-range options fail before launching
 test('dry probes stop before thread creation, paginate and omit account metadata', async () => {
   const methods = [];
   let ordinaryUsageAllowed = true;
+  let providerSupport = true;
   const rpc = {
     notify: method => methods.push(method),
     async request(method, params) {
@@ -31,6 +32,9 @@ test('dry probes stop before thread creation, paginate and omit account metadata
         case 'account/rateLimits/read': return { accountId: 'unneeded', ordinaryUsageAllowed, rateLimits: { primary: { usedPercent: 20 } } };
         case 'experimentalFeature/list': return params.cursor ? { data: [{ name: 'image_generation', enabled: true }] } :
           { data: [], nextCursor: 'next' };
+        case 'modelProvider/capabilities/read':
+          if (providerSupport === null) throw new Error('capability unavailable');
+          return { imageGeneration: providerSupport, webSearch: true };
         case 'model/list': return { data: [{ model: 'sample', isDefault: true, inputModalities: ['image'] }] };
         default: assert.fail(method);
       }
@@ -42,6 +46,16 @@ test('dry probes stop before thread creation, paginate and omit account metadata
   assert.equal(checks.ready, true);
   assert.equal(checks.model, 'sample');
   assert.ok(!JSON.stringify(checks).includes('unneeded'));
+  for (const supported of [false, null]) {
+    providerSupport = supported;
+    const blocked = { issues: {} };
+    await preflight(rpc, blocked, {});
+    assert.equal(blocked.ready, false);
+    assert.ok(blocked.issues.providerImageGeneration);
+    assert.equal(blocked.imageGeneration, true);
+  }
+  assert.ok(!methods.includes('turn/start'));
+  providerSupport = true;
   ordinaryUsageAllowed = false;
   await preflight(rpc, checks, {});
   assert.equal(checks.ready, false);

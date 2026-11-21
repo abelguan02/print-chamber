@@ -142,7 +142,7 @@ function collectFindings(results) {
     },
     {
       question: '本机最小可用性检测步骤？',
-      answer: '运行一次 node experiments/codex-imagegen/run.cjs --dry-run，在 results.json 查看 preflight.handshake 与 preflight.ready 是否均为 true，并核对 ChatGPT 登录、image_generation 已开启、存在支持图片输入的模型及限额检查情况。限额读数缺失时，实际可用额度未知。遇到问题可用 codex --version、codex login status 和 codex features list 单独诊断。端到端验证需要一次真实附图请求、图片工具事件和可解码的产物，确认工具读入原画还需核对输入哈希。',
+      answer: '运行一次 node experiments/codex-imagegen/run.cjs --dry-run，在 results.json 查看 preflight.handshake 与 preflight.ready 是否均为 true，并核对 ChatGPT 登录、image_generation 已开启、供应商声明支持图片生成、存在支持图片输入的模型及限额检查情况。限额读数缺失时，实际可用额度未知。遇到问题可用 codex --version、codex login status 和 codex features list 单独诊断。端到端验证需要一次真实附图请求、图片工具事件和可解码的产物，确认工具读入原画还需核对输入哈希。',
     },
   ];
   return questions.map((finding, i) => ({ number: i + 1, ...finding }));

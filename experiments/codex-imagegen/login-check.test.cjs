@@ -130,6 +130,7 @@ async function runLoginMode(t, mode) {
       const reply = {
         initialize: {}, 'account/read': {account: fs.existsSync(process.env.CODEX_HOME + '/public-fixture-marker') ? {type:'chatgpt'} : null},
         'experimentalFeature/list': {data:[{name:'image_generation',enabled:true}]},
+        'modelProvider/capabilities/read': {imageGeneration:true,webSearch:false},
         'model/list': {data:[{model:'fixture',inputModalities:['image']}]}, 'account/rateLimits/read': {},
       };
       require('node:readline').createInterface({input:process.stdin}).on('line', line => {

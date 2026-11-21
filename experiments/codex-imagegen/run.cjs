@@ -19,6 +19,7 @@ const G3_SHA256 = 'c2b9255da22505c3e2895fc2fcdbb076167405bb45cb8c68dbba7457e2c01
 
 // Configure the native service. Only the model backend needs network access.
 const SERVER_ARGS = [
+  '-c', 'model_provider="openai"',
   '-c', 'features.shell_tool=false', '-c', 'features.unified_exec=false',
   '-c', 'features.apps=false', '-c', 'features.plugins=false', '-c', 'features.hooks=false',
   '-c', 'features.code_mode=false', '-c', 'features.multi_agent=false',
@@ -111,6 +112,7 @@ async function preflight(client, checks, failureModes) {
     accountType: async () => (await client.request('account/read', {})).account?.type ?? 'signed-out',
     imageGeneration: async () => (await pages(client, 'experimentalFeature/list',
       f => ({ name: f.name, enabled: f.enabled }))).find(f => f.name === 'image_generation')?.enabled ?? null,
+    providerImageGeneration: async () => (await client.request('modelProvider/capabilities/read', {})).imageGeneration,
     models: () => pages(client, 'model/list', m => ({
       model: m.model, imageInput: m.inputModalities?.includes('image') ?? true, isDefault: m.isDefault,
     })),
@@ -127,7 +129,9 @@ async function preflight(client, checks, failureModes) {
   if (checks.imageGeneration === false) failureModes.featureDisabled = '功能查询返回 enabled=false；预检终止，未发送生成请求。';
   const models = (checks.models ?? []).filter(m => m.imageInput);
   checks.model = (models.find(m => m.isDefault) ?? models[0])?.model ?? null;
-  checks.ready = checks.rateLimits?.ordinaryUsageAllowed !== false && checks.accountType === 'chatgpt' && checks.imageGeneration === true && !!checks.model;
+  if (checks.providerImageGeneration === false) checks.issues.providerImageGeneration = '供应商报告不支持图片生成。';
+  checks.ready = checks.rateLimits?.ordinaryUsageAllowed !== false && checks.accountType === 'chatgpt' &&
+    checks.imageGeneration === true && checks.providerImageGeneration === true && !!checks.model;
 }
 
 function newRecord(source) {
@@ -212,7 +216,8 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
     if (completedImage) Object.assign(record, collectImage(completedImage, tempRoot, outputDir, source.id, source.sha256, allowedImageRoots));
     if (record.turnStatus !== 'completed') throw new Error('turn/completed: ' + record.turnStatus +
       (record.turnErrorCode ? ' (' + record.turnErrorCode + ')' : ''));
-    if (!record.outputImage || !record.imageToolCalled) throw new Error(record.error || '未收到图片工具的有效输出');
+    if (!record.imageToolCalled) throw new Error('本次会话未观测到图片生成工具调用，未收到有效输出');
+    if (!record.outputImage) throw new Error(record.error || '已观测到图片工具调用，但未收到有效输出');
     record.status = 'success';
   } finally {
     clearTimeout(timer);
@@ -319,7 +324,7 @@ async function run(mode) {
       if (record.error) continue;
       if (quotaBlocked) { record.error = '账号已报告当前额度受限，未提交本张原画。'; continue; }
       if (!results.preflight.ready || cancellation.signal.aborted) {
-        record.error = '预检未就绪或已终止，未提交本张原画。';
+        record.error = results.preflight.issues.providerImageGeneration ?? '预检未就绪或已终止，未提交本张原画。';
         continue;
       }
       const source = dataset.sources[record.id - 1];
