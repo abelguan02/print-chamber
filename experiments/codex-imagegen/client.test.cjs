@@ -107,3 +107,41 @@ test('close reaps an unresponsive owned child and tolerates repeated cleanup', a
   await close;
   assert.throws(() => process.kill(client.pid, 0), { code: 'ESRCH' });
 });
+
+test('thread creation accepts a reply after the ordinary 15 s deadline without resending', async t => {
+  const {startImageThread} = require('./run.cjs');
+  let received;
+  const bothReceived = new Promise(resolve => { received = resolve; });
+  const client = await fakeClient(t, `
+    const pending = [];
+    const send = msg => console.log(JSON.stringify(msg));
+    require('node:readline').createInterface({input:process.stdin}).on('line', line => {
+      const req = JSON.parse(line);
+      if (req.method === 'thread/start') {
+        pending.push(req);
+        if (pending.length === 2) send({method:'test/bothReceived',params:{}});
+      } else if (req.method === 'test/release') {
+        for (const {id,params} of pending) send({id,result:{
+          thread:{id:'test-session'}, sandbox:{type:'readOnly'}, approvalPolicy:'never',
+          modelProvider:'openai', model:params.model
+        }});
+      } else process.exit(1);
+    });`, () => received());
+  t.mock.timers.enable({apis:['setTimeout']});
+  try {
+    const old = assert.rejects(client.request('thread/start', {}), {
+      code:'APP_SERVER_REQUEST_TIMEOUT',method:'thread/start',timeoutMs:15000,
+    });
+    const current = startImageThread(client,{cwd:'/tmp',model:'sample',directImage:true,singleAttempt:true});
+    await bothReceived;
+    t.mock.timers.tick(16000);
+    await old;
+    client.notify('test/release');
+    assert.equal(await current,'test-session');
+    const stalled = assert.rejects(startImageThread(client,{cwd:'/tmp',model:'sample',directImage:true}),{
+      code:'APP_SERVER_REQUEST_TIMEOUT',method:'thread/start',timeoutMs:90000,
+    });
+    t.mock.timers.tick(90000);
+    await stalled;
+  } finally { t.mock.timers.reset(); }
+});

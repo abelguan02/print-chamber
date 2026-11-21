@@ -16,6 +16,7 @@ const ROOT = path.resolve(__dirname, '../..');
 const DATA = 'output/scenes-g3-20261025-060950';
 const INSTRUCTION = '调用图片生成工具，以附带图片为参考，按以下要求生成 1 张图，不要写代码、不要回复其他内容。';
 const TURN_MS = 300_000;
+const THREAD_START_MS = 90_000;
 const G3_SHA256 = 'c2b9255da22505c3e2895fc2fcdbb076167405bb45cb8c68dbba7457e2c01ccb';
 
 // Configure the native service. Only the model backend needs network access.
@@ -187,9 +188,7 @@ function newRecord(source) {
   };
 }
 
-// Only one fresh thread is active. Notifications can precede the turn/start reply.
-async function runTurn({ client, listen, record, source, prompt, model, tempRoot, cwd, outputDir,
-  inputPath = path.join(outputDir, record.sourceImage), allowedImageRoots, singleAttempt = false, directImage = false, timeoutMs = TURN_MS }) {
+async function startImageThread(client, {cwd, model, singleAttempt, directImage}) {
   let developerInstructions;
   if (directImage) {
     developerInstructions = 'Call image_gen.imagegen directly, exactly once. Pass the attached original’s absolute path in referenced_image_paths and the supplied G3 text as the prompt. Stop on success or failure. Do not retry or use other tools.';
@@ -199,13 +198,20 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
   const thread = await client.request('thread/start', {
     cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true, modelProvider: 'openai', model,
     ...(developerInstructions && { developerInstructions }),
-  });
+  }, THREAD_START_MS);
   if (thread.approvalPolicy !== 'never' || thread.sandbox?.type !== 'readOnly' ||
       thread.sandbox.networkAccess === true || thread.modelProvider !== 'openai') {
     throw new Error('服务端未确认只读、禁审批、受限联网与 OpenAI 供应商；未提交原画。');
   }
   if (singleAttempt && thread.model !== model) throw new Error('服务端未确认预检通过的图片输入模型，未提交原画。');
-  const threadId = thread.thread.id;
+  if (typeof thread.thread?.id !== 'string' || !thread.thread.id) throw new Error('Codex 未返回会话编号；未提交原画。');
+  return thread.thread.id;
+}
+
+// Only one fresh thread is active. Notifications can precede the turn/start reply.
+async function runTurn({ client, listen, record, source, prompt, model, tempRoot, cwd, outputDir,
+  inputPath = path.join(outputDir, record.sourceImage), allowedImageRoots, singleAttempt = false, directImage = false, timeoutMs = TURN_MS }) {
+  const threadId = await startImageThread(client, {cwd, model, singleAttempt, directImage});
   let turnId;
   let finished;
   let timer;
@@ -596,4 +602,4 @@ if (require.main === module) {
     .catch(error => { console.error(error.message); process.exitCode = 1; });
 }
 
-module.exports = { INSTRUCTION, SERVER_ARGS, modeFrom, confirmChatgpt, preflight, runTurn };
+module.exports = { INSTRUCTION, SERVER_ARGS, modeFrom, confirmChatgpt, preflight, startImageThread, runTurn };

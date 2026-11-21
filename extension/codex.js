@@ -4,7 +4,8 @@ function codexRequest(request) {
     const port=chrome.runtime.connectNative('com.printchamber.codex');
     const chunks=[];
     let size=0,finished=false;
-    const timer=setTimeout(()=>finish(null,'本机 Codex 等待超时，操作已停止'),request.type==='connect'?30000:360000);
+    // Printing includes login/preflight, up to 90 s for thread/start, and a separate 5 min turn.
+    const timer=setTimeout(()=>finish(null,'本机 Codex 等待超时，操作已停止'),request.type==='connect'?30000:480000);
     function finish(result,error){
       if(finished)return;
       finished=true; clearTimeout(timer); port.disconnect();

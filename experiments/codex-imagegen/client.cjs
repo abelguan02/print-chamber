@@ -115,7 +115,9 @@ class AppServerClient {
       const id = this.#nextId++;
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        reject(new Error(`${method} timed out`));
+        reject(Object.assign(new Error(`${method} timed out`), {
+          code: 'APP_SERVER_REQUEST_TIMEOUT', method, timeoutMs,
+        }));
       }, timeoutMs);
       this.#pending.set(id, { method, resolve, reject, timer });
     });
