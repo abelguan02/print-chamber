@@ -17,45 +17,50 @@ test('Local setup: first use, state checks, shared token persistence and cloud m
   const [page]=await Promise.all([context.waitForEvent('page'),popup.click('#save')]);
   page.on('pageerror',e=>errors.push(e.message));
   await page.waitForURL(base+'/settings.html');await page.waitForFunction(()=>document.querySelector('#local-status').textContent.includes('未配置'));
-  await page.waitForFunction(()=>!document.querySelector('#first-use-note').hidden);
+  await page.waitForFunction(()=>!document.querySelector('#fields').disabled);
   assert.equal(await page.inputValue('#mode'),'cloud');
-  assert.equal(await page.isChecked('#consent'),false);
   assert.equal((await worker.evaluate(()=>chrome.storage.local.get('generationMode'))).generationMode,undefined);
   await page.selectOption('#mode','local');
-  const guide=page.locator('details').filter({has:page.locator('summary', {hasText:'首次连接指南'})});
-  assert.equal(await guide.getAttribute('open'),null);
-  await guide.locator('summary').focus();await page.keyboard.press('Enter');
-  assert.equal(await guide.evaluate(e=>e.open),true);
-  await guide.locator('summary').click();
-  await page.click('#local-check');assert.match(await page.locator('#local-status').innerText(),/未配置/);
+  assert.equal(await page.locator('.hint, details, .consent').count(),0);
+  await page.click('#local-check');assert.equal(await page.locator('#local-status').innerText(),'未配置');
   await worker.evaluate(()=>chrome.storage.local.set({generationMode:'cloud'}));
   await page.fill('#local-token','test-local-only');
   await page.evaluate(()=>{window.healthCase='ready';window.fetch=async(url,options)=>{
    if(url!=='http://127.0.0.1:8877/health'||options.headers.Authorization!=='Bearer test-local-only')throw Error('Unexpected request');
    if(healthCase==='offline')throw TypeError('Failed to fetch');
    if(healthCase==='timeout')throw new DOMException('timeout','TimeoutError');
+   if(healthCase==='body-timeout'){
+    return new Response(new ReadableStream({start(controller){
+     options.signal.addEventListener('abort',()=>controller.error(new DOMException('aborted','AbortError')),{once:true});
+    }}));
+   }
    if(healthCase==='unauthorized')return new Response('{}',{status:401});
    if(healthCase==='http')return new Response('{}',{status:500});
    if(healthCase==='invalid')return new Response('{}');
+   if(healthCase==='invalid-json')return new Response('<html>');
    return new Response(JSON.stringify({ready:healthCase!=='loading',failed:healthCase==='failed',busy:healthCase==='busy'}));
   }});
-  for(const [state,expected] of [['ready','已就绪'],['loading','模型加载中'],['busy','模型忙碌'],['failed','模型加载失败'],['unauthorized','连接码不匹配'],['http','HTTP 500'],['invalid','响应异常'],['offline','无法连接'],['timeout','连接超时']]){
+  for(const [state,expected] of [
+   ['ready','已就绪'],['loading','模型加载中'],['busy','模型忙碌'],['failed','模型加载失败 · 查看小助手日志'],
+   ['unauthorized','连接码不匹配'],['http','服务异常 · HTTP 500'],
+   ['invalid','不是兼容的本地服务'],['invalid-json','不是兼容的本地服务'],
+   ['offline','服务未启动 · 在小助手中启动'],['timeout','连接超时'],['body-timeout','连接超时']
+  ]){
    await page.evaluate(s=>window.healthCase=s,state);await page.click('#local-check');
    await page.waitForFunction(()=>!document.querySelector('#fields').disabled);
-   assert.match(await page.locator('#local-status').innerText(),new RegExp(expected));
+   assert.equal(await page.locator('#local-status').innerText(),expected);
    assert.equal(await page.locator('#notice').innerText(),'','The local result has one status location');
   }
   assert.equal((await worker.evaluate(()=>chrome.storage.local.get('token'))).token,undefined);
   assert.equal((await worker.evaluate(()=>chrome.storage.local.get('generationMode'))).generationMode,'cloud');
-  await page.click('#save-settings');await page.waitForFunction(()=>document.querySelector('#notice').textContent.includes('已保存本地配置'));
+  await page.click('#save-settings');await page.waitForFunction(()=>document.querySelector('#notice').textContent==='已保存');
   assert.deepEqual(await worker.evaluate(()=>chrome.storage.local.get(['token','generationMode'])),{token:'test-local-only',generationMode:'local'});
   assert.equal(await page.inputValue('#local-token'),'');
   await page.reload();await page.waitForFunction(()=>document.querySelector('#local-key-state').textContent.includes('已保存'));
   await page.waitForFunction(()=>document.querySelector('#mode').value==='local');
-  assert.equal(await page.locator('#first-use-note').isVisible(),false);
-  assert.match(await page.locator('#local-status').innerText(),/尚未检查/);
+  assert.equal(await page.locator('#local-status').innerText(),'尚未检查');
   await popup.reload();await popup.locator('#dashboard').waitFor();
-  assert.equal(await popup.locator('#dashboard-lcd').innerText(),'READY');
+  await popup.waitForFunction(()=>document.querySelector('#dashboard-lcd').textContent==='READY');
   await popup.locator('#connection-led').click();
   assert.equal(context.pages().filter(p=>p.url()===base+'/settings.html').length,1);
   assert.equal(await popup.locator('#token').isVisible(),false);
@@ -73,10 +78,11 @@ test('Local setup: first use, state checks, shared token persistence and cloud m
    await page.selectOption('#mode','local');
   }
   await page.setViewportSize({width:1100,height:900});
-  await page.screenshot({path:path.join(root,'output/local-settings-clean.png'),fullPage:true});
+  await page.click('#local-check');
+  await page.waitForFunction(()=>document.querySelector('#local-status').textContent==='已就绪');
+  await page.screenshot({path:path.join(root,'output/settings-local.png'),fullPage:true});
   await page.selectOption('#mode','cloud');
   assert.ok(await page.evaluate(()=>document.querySelector('#save-settings').getBoundingClientRect().top<document.querySelector('#trial-section').getBoundingClientRect().top));
-  await page.screenshot({path:path.join(root,'output/cloud-settings-clean.png'),fullPage:true});
   assert.deepEqual(errors,[]);
  }finally{await context?.close();await fs.rm(profile,{recursive:true,force:true});}
 });
