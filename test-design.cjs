@@ -90,7 +90,15 @@ const fs=require('fs');const assert=require('node:assert/strict');
  // Saved prints remain viewable with invalid credentials.
  await page.keyboard.press('Escape');await page.mouse.move(0,0);
  const popup=await context.newPage();popup.on('pageerror',e=>errors.push(e.message));await worker.evaluate(()=>chrome.storage.local.set({token:''}));await page.bringToFront();await popup.goto(`chrome-extension://${id}/popup.html`);await popup.setViewportSize({width:360,height:650});await popup.locator('#setup').waitFor();await popup.screenshot({path:'output/new-setup.png'});assert.equal(await popup.locator('#token').isVisible(),false);
- const [settings]=await Promise.all([context.waitForEvent('page'),popup.locator('#save').click()]);await settings.waitForURL(`chrome-extension://${id}/settings.html`);await settings.waitForFunction(()=>!document.querySelector('#first-use-note').hidden);await settings.selectOption('#mode','local');await settings.locator('#local-token').fill('test');await settings.locator('#save-settings').click();await settings.waitForFunction(()=>document.querySelector('#notice').textContent&&!document.querySelector('#fields').disabled);assert.match(await settings.locator('#notice').innerText(),/已保存本地配置/);
+ const [settings]=await Promise.all([context.waitForEvent('page'),popup.locator('#save').click()]);
+ await settings.waitForURL(`chrome-extension://${id}/settings.html`);
+ await settings.waitForFunction(()=>!document.querySelector('#fields').disabled);
+ assert.equal(await settings.inputValue('#mode'),'cloud');
+ await settings.selectOption('#mode','local');
+ await settings.locator('#local-token').fill('test');
+ await settings.locator('#save-settings').click();
+ await settings.waitForFunction(()=>!document.querySelector('#fields').disabled);
+ assert.equal(await settings.locator('#notice').innerText(),'已保存');
  await popup.route('http://127.0.0.1:8877/health',r=>r.fulfill({contentType:'application/json',body:'{"ready":true}'}));await popup.reload();await popup.locator('#dashboard').waitFor();await popup.screenshot({path:'output/new-dashboard.png'});assert.equal(await popup.locator('#recent a').count(),2);await popup.locator('[data-trigger=alt]').click();assert.equal(await worker.evaluate(async()=>(await chrome.storage.local.get('trigger')).trigger),'alt');
  const gallery=await context.newPage();gallery.on('pageerror',e=>errors.push(e.message));await gallery.route('http://127.0.0.1:8877/health',r=>r.fulfill({contentType:'application/json',body:'{"ready":true}'}));await gallery.goto(`chrome-extension://${id}/gallery.html`);await gallery.locator('#records article').first().waitFor();await gallery.screenshot({path:'output/new-gallery.png',fullPage:true});assert.equal(await gallery.locator('#records article').count(),2);await gallery.locator('[data-filter=Behance]').click();assert.equal(await gallery.locator('#records article').count(),0);await gallery.locator('[data-filter=all]').click();await gallery.locator('.picture').first().click();assert(await gallery.locator('#detail').isVisible());await gallery.keyboard.press('Escape');
  // Visual fixture uses the exact gradient placeholder from the supplied printer board.

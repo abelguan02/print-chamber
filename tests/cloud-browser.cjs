@@ -41,36 +41,90 @@ test('cloud settings, private keys, trial and explicit print with history reuse'
    };
   },image);
   const settings=await context.newPage();const errors=[];settings.on('pageerror',e=>errors.push(e.message));
-  await settings.goto(`chrome-extension://${id}/settings.html`);await settings.selectOption('#mode','cloud');
+  await settings.goto(`chrome-extension://${id}/settings.html`);
+  await settings.waitForFunction(()=>!document.querySelector('#fields').disabled);
+  await settings.selectOption('#mode','cloud');
   await worker.evaluate(()=>chrome.storage.local.set({generationMode:'cloud'}));
   const missingProvider = await settings.evaluate(()=>chrome.runtime.sendMessage({type:'cloud-check'}));
   assert.equal(missingProvider.error,'请先在生成设置中选择并保存云端供应商');
   assert.equal(await worker.evaluate(()=>requests.length),0);
   await worker.evaluate(()=>chrome.storage.local.remove('generationMode'));
-  await settings.check('#consent');
-  for(const provider of ['minimax-cn','minimax','bfl','volc','ali','google']){
-   await settings.selectOption('#provider',provider);await settings.fill('#key',`fake-${provider}`);
-   assert.equal(await settings.locator('#provider-region-note').isVisible(),provider.startsWith('minimax'));
-   assert.match(await settings.locator('#cloud-check-help').innerText(),provider==='google'?/查询所选模型/:/仅检查接口可达性/);
+  const fixture=require('./browser-options.cjs').fixture;
+  const chargeMessage='云端生成会上传原画到所选供应商，并按次计费。继续？';
+  const dialogs=[];
+  let acceptNext=false;
+  settings.on('dialog',async dialog=>{
+   dialogs.push([dialog.type(),dialog.message()]);
+   if(acceptNext){acceptNext=false;await dialog.accept();}
+   else await dialog.dismiss();
+  });
+  async function completeAction(button){
+   await settings.click(button);
+   await settings.waitForFunction(()=>!document.querySelector('#fields').disabled);
+  }
+  const billingState=()=>worker.evaluate(()=>chrome.storage.local.get(['cloudChargeAcknowledged','generationMode','cloudProvider']));
+  const publicConfig=()=>settings.evaluate(()=>chrome.runtime.sendMessage({type:'cloud-load'}));
+  const providers=['minimax-cn','minimax','bfl','volc','ali','google'];
+  await settings.selectOption('#provider',providers[0]);
+  assert.equal(await settings.evaluate(()=>document.querySelectorAll('.hint, details, .consent').length),0);
+  assert.equal(await settings.locator('#verification').isVisible(),false);
+  assert.equal(await settings.locator('#forget').isVisible(),false);
+  await settings.fill('#key','fake-minimax-cn');
+  await settings.setInputFiles('#file',fixture);
+  const initialConfig=await publicConfig();
+  const initialBillingState=await billingState();
+  for(const button of ['#save-settings','#check','#trial']){
+   const count=dialogs.length;
+   await completeAction(button);
+   assert.deepEqual(dialogs.slice(count),[['confirm',chargeMessage]],button);
+   assert.equal(await settings.locator('#notice').innerText(),'已取消');
+   assert.deepEqual(await billingState(),initialBillingState);
+   assert.deepEqual(await publicConfig(),initialConfig);
+   assert.equal(await worker.evaluate(()=>requests.length),0);
+  }
+  acceptNext=true;
+  await completeAction('#save-settings');
+  assert.deepEqual(dialogs,Array(4).fill(['confirm',chargeMessage]));
+  assert.deepEqual(await billingState(),{cloudChargeAcknowledged:true,generationMode:'cloud',cloudProvider:providers[0]});
+  assert.equal(await settings.locator('#notice').innerText(),'已启用云端生成');
+  assert.equal(await settings.locator('#forget').isVisible(),true);
+  await completeAction('#save-settings');
+  assert.equal(await settings.locator('#notice').innerText(),'已启用云端生成');
+  await settings.setInputFiles('#file',[]);
+  await settings.setViewportSize({width:1100,height:900});
+  await settings.screenshot({path:path.join(root,'output/settings-cloud.png'),fullPage:true});
+  await settings.reload();
+  await settings.locator('#forget').waitFor();
+  for(const provider of providers){
+   await settings.selectOption('#provider',provider);
+   if(provider!==providers[0])await settings.fill('#key',`fake-${provider}`);
    if(provider==='ali')await settings.fill('#workspace','test-workspace');
-   await settings.click('#check');await settings.waitForFunction(()=>document.querySelector('#notice').textContent.includes('未验证'));
+   const requestsBefore=await worker.evaluate(()=>requests.length);
+   await completeAction('#check');
+   assert.equal(await worker.evaluate(()=>requests.length),requestsBefore+1);
+   assert.equal(await settings.locator('#notice').innerText(),provider==='google'?'模型查询通过':'接口可达');
    assert.equal(await settings.inputValue('#key'),'');
+   assert.equal(await settings.locator('#verification').isVisible(),false);
    const before=await worker.evaluate(()=>requests.filter(r=>r.method==='POST').length);
-   await settings.setInputFiles('#file',require('./browser-options.cjs').fixture);
-   settings.once('dialog',d=>d.accept());await settings.click('#trial');await settings.waitForFunction(()=>document.querySelector('#notice').textContent.includes('实际生成通过'));
+   await settings.setInputFiles('#file',fixture);
+   await completeAction('#trial');
+   assert.match(await settings.locator('#notice').innerText(),/^生成完成 · \d+\.\d 秒$/);
    assert.equal(await worker.evaluate(()=>requests.filter(r=>r.method==='POST').length),before+1);
    assert.ok(await settings.locator('#preview').isVisible());
-   if(provider.startsWith('minimax'))assert.match(await settings.locator('#provider-notice').innerText(),/效果未验证/);
+   assert.match(await settings.locator('#verification').innerText(),/^上次生成成功 · .+/);
    assert.ok(!(await worker.evaluate(()=>chrome.storage.local.get(null))).key);
    assert.ok(!JSON.stringify(await worker.evaluate(()=>chrome.storage.local.get(null))).includes('fake-'));
   }
-  await settings.reload();await settings.waitForFunction(()=>document.querySelector('#verification').textContent.includes('曾生成成功'));
+  assert.equal(dialogs.length,4,'Repeated saves, checks and trials must reuse the confirmation across reloads');
+  await settings.reload();await settings.locator('#verification').waitFor();
+  assert.match(await settings.locator('#verification').innerText(),/^上次生成成功 · .+/);
   assert.equal(await settings.inputValue('#key'),'');
-  await settings.selectOption('#model','gemini-3.1-flash-image');await settings.click('#save-settings');
-  await settings.waitForFunction(()=>document.querySelector('#notice').textContent.includes('已启用'));
-  assert.match(await settings.locator('#verification').innerText(),/尚未/);
-  await worker.evaluate(()=>{rejectNext=true;});await settings.click('#check');await settings.waitForFunction(()=>document.querySelector('#notice').textContent.includes('密钥无效'));
-  await settings.screenshot({path:path.join(root,'output/cloud-settings.png'),fullPage:true});
+  await settings.selectOption('#model','gemini-3.1-flash-image');
+  assert.equal(await settings.locator('#verification').isVisible(),false);
+  await completeAction('#save-settings');
+  assert.equal(await settings.locator('#verification').isVisible(),false);
+  await worker.evaluate(()=>{rejectNext=true;});await completeAction('#check');
+  assert.match(await settings.locator('#notice').innerText(),/密钥无效/);
   const source='https://www.artstation.com/cloud-regression';
   await context.route(source,r=>r.fulfill({contentType:'text/html',body:'<body style="padding:80px"><img id="art" width="240" height="360" src="https://cdna.artstation.com/cloud.png"></body>'}));
   await context.route('https://cdna.artstation.com/cloud.png',r=>r.fulfill({contentType:'image/png',body:fs.readFileSync(require('./browser-options.cjs').fixture)}));
@@ -98,13 +152,37 @@ test('cloud settings, private keys, trial and explicit print with history reuse'
    const result=await chrome.scripting.executeScript({target:{tabId},func:()=>chrome.runtime.sendMessage({type:'cloud-load'})});return result[0].result;
   },(await worker.evaluate(()=>chrome.tabs.query({url:'https://www.artstation.com/cloud-regression'})))[0].id);
   assert.match(denied.error,/仅设置页面/);
-  await settings.locator('summary').filter({hasText:'密钥与使用说明'}).click();
-  await settings.click('#forget');await settings.waitForFunction(()=>document.querySelector('#notice').textContent.includes('密钥已删除'));
+  await completeAction('#forget');
+  assert.equal(await settings.locator('#notice').innerText(),'密钥已删除');
+  assert.equal((await billingState()).cloudChargeAcknowledged,true,'Other suppliers still have keys');
   assert.equal(await settings.inputValue('#mode'),'local');
   assert.equal((await worker.evaluate(()=>chrome.storage.local.get('generationMode'))).generationMode,'local');
   await page.reload();await page.locator('#art').hover();await host.locator('.panel.ready').waitFor({timeout:5000});
   assert.match(await host.locator('.caption').innerText(),/历史打印.*云端/,'history retains its origin after changing modes and deleting credentials');
   assert.equal(await worker.evaluate(()=>requests.filter(r=>r.method==='POST').length),posts+2);
+  await settings.selectOption('#mode','cloud');
+  assert.equal(await settings.locator('#forget').isVisible(),false);
+  for(const provider of providers.filter(id=>id!=='google')){
+   await settings.selectOption('#provider',provider);
+   assert.equal((await billingState()).cloudChargeAcknowledged,true);
+   assert.equal(await settings.locator('#forget').isVisible(),true);
+   await completeAction('#forget');
+   assert.equal(await settings.locator('#notice').innerText(),'密钥已删除');
+   await settings.selectOption('#mode','cloud');
+   assert.equal(await settings.locator('#forget').isVisible(),false);
+  }
+  assert.equal(dialogs.length,4);
+  assert.equal((await billingState()).cloudChargeAcknowledged,undefined);
+  await settings.reload();
+  await settings.waitForFunction(()=>!document.querySelector('#fields').disabled);
+  await settings.selectOption('#mode','cloud');
+  await settings.selectOption('#provider','google');
+  await settings.fill('#key','fake-google');
+  acceptNext=true;
+  await completeAction('#check');
+  assert.deepEqual(dialogs.slice(4),[['confirm',chargeMessage]]);
+  assert.equal((await billingState()).cloudChargeAcknowledged,true);
+  assert.equal(await settings.locator('#forget').isVisible(),true);
   assert.deepEqual(errors,[]);
  }finally{await context.close();fs.rmSync(profile,{recursive:true,force:true});}
 });

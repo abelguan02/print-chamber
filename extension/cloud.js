@@ -1,8 +1,8 @@
 // Provider contracts: see CLOUD.md. No keys are stored in this module.
 globalThis.Cloud = (() => {
   const providers = {
-    'minimax-cn': {name:'MiniMax · 中国大陆（效果未验证）', models:['image-01'], base:'https://api.minimax.cn/v1', notice:'人物参考生成，效果未验证：可能改变原画构图、姿势、服饰或背景。即使生成成功，也不代表设计还原效果通过。'},
-    minimax: {name:'MiniMax · 海外（效果未验证）', models:['image-01'], base:'https://api.minimax.io/v1', notice:'人物参考生成，效果未验证：可能改变原画构图、姿势、服饰或背景。即使生成成功，也不代表设计还原效果通过。'},
+    'minimax-cn': {name:'MiniMax · 中国大陆', models:['image-01'], base:'https://api.minimax.cn/v1'},
+    minimax: {name:'MiniMax · 海外', models:['image-01'], base:'https://api.minimax.io/v1'},
     bfl: {name:'Black Forest Labs · FLUX', models:['flux-2-klein-4b','flux-2-klein-9b','flux-2-pro','flux-2-max'], base:'https://api.bfl.ai/v1'},
     volc: {name:'火山方舟 · Seedream', models:['doubao-seedream-5-0-flash-260915','doubao-seedream-5-0-lite-260128'], base:'https://ark.cn-beijing.volces.com/api/v3'},
     ali: {name:'阿里云百炼 · 千问图像', models:['qwen-image-2.0-pro','qwen-image-2.0']},
