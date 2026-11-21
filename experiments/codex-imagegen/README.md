@@ -12,7 +12,7 @@ node experiments/codex-imagegen/run.cjs --check-existing-login
 
 仅在这个入口，签名已核验的官方 Codex 按 Ledge 的方式使用当前用户的正常文件权限维护自己的运行状态，并限制启动其他可执行程序。Print Chamber 通过本地进程通信查询状态；不打开登录文件、不保存令牌、不主动刷新登录，也不调用登录命令。检查不读取素材，不创建模型会话或生成任务。登录不可用或连接中断时停止。
 
-查看终端打印的 `output/codex-existing-login-<时间戳>-<后缀>/results.json`，其中 `existingLogin.verified` 仅在两次账号查询均识别到 ChatGPT 登录时为真。本次开发环境在配置进程权限时停止，正式服务未启动，两次查询均未进行。模拟服务已验证正常重连、未登录、连接中断和取消。真实登录结果待普通终端验证。
+2026-11-21 04:06（美东），用户在普通终端对桌面端 Codex `0.171.0-alpha.13` 完成实测。首次连接和关闭后重连均握手成功，`account/read` 两次返回 `chatgpt`；全程无需重新登录。报告 `output/codex-existing-login-2026-11-21T09-06-57-997Z-bxpfJB/results.json` 记录 `existingLogin.verified=true`、`submitted=0`，无错误。本次实测验证了登录专用入口；首图重绘仍未通过验收。
 
 ## 此前的首图试验
 
