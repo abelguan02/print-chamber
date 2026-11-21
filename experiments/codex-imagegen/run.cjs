@@ -180,7 +180,7 @@ function newRecord(source) {
   return {
     id: source.id, sourceSha256: source.sha256, attempted: false, status: 'skipped',
     startedAt: null, endedAt: null, durationMs: null, firstEventMs: null, turnStatus: null,
-    imageToolCalled: false, imageToolStatus: null, referenceHashMatched: null,
+    imageToolCalled: false, imageToolCallCount: 0, imageToolStatus: null, terminalItemsView: null, referenceHashMatched: null,
     outputImage: null, format: null, width: null, height: null, reportedPath: null, reportedPathScope: null,
     sourceImage: null, fluxImage: null, reply: '', rateLimitsBefore: null, rateLimitsAfter: null,
     rateLimitErrors: {}, error: null,
@@ -207,23 +207,45 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
   let acceptingEvents = true;
   let completedImage;
   let terminalTime;
+  const imageCalls = new Map();
   const texts = new Map();
   const completion = new Promise(resolve => { finished = resolve; });
   const start = performance.now();
   record.startedAt = new Date().toISOString();
+  function observeImage(item, complete, summary = false) {
+    if (item?.type !== 'imageGeneration') return;
+    const prior = imageCalls.get(item.id);
+    record.imageToolCalled = true;
+    if (item.failure?.type === 'usageLimitExceeded') record.imageToolFailure = item.failure.type;
+    if (complete) {
+      completedImage = item;
+      if (prior) {
+        // A second snapshot of the same tool call may carry only an attachment ID.
+        // Keep the original bytes and source evidence when the snapshot omits them.
+        const [preferred, other] = summary ? [prior, item] : [item, prior];
+        completedImage = {
+          ...preferred, result: preferred.result || other.result, savedPath: preferred.savedPath ?? other.savedPath,
+          fileId: preferred.fileId ?? other.fileId, failure: preferred.failure ?? other.failure,
+          inputImages: preferred.inputImages?.length ? preferred.inputImages : other.inputImages ?? preferred.inputImages,
+          status: other.status === 'failed' ? 'failed' : preferred.status,
+        };
+      }
+      imageCalls.set(item.id, completedImage);
+      record.imageToolStatus = completedImage.status;
+    } else if (!imageCalls.has(item.id)) {
+      imageCalls.set(item.id, null);
+      record.imageToolStatus = item.status;
+    }
+    record.imageToolCallCount = imageCalls.size;
+  }
   const handle = (method, params) => {
     if (!acceptingEvents || params?.threadId !== threadId) return;
-    const id = params.turnId ?? params.turn?.id;
+    const id = params.turn?.id ?? params.turnId;
     if (!id || (turnId && turnId !== id)) return;
     turnId = id;
     if (record.firstEventMs === null) record.firstEventMs = Math.round(performance.now() - start);
     const item = params.item;
-    if ((method === 'item/started' || method === 'item/completed') && item?.type === 'imageGeneration') {
-      record.imageToolCalled = true;
-      record.imageToolStatus = item.status;
-      if (item.failure?.type === 'usageLimitExceeded') record.imageToolFailure = item.failure.type;
-      if (method === 'item/completed') completedImage = item;
-    }
+    if (method === 'item/started' || method === 'item/completed') observeImage(item, method === 'item/completed');
     if (method === 'item/agentMessage/delta') {
       texts.set(params.itemId, Array.from((texts.get(params.itemId) ?? '') + params.delta).slice(0, 500).join(''));
     } else if (method === 'item/completed' && item?.type === 'agentMessage') {
@@ -233,6 +255,12 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
       terminalTime = performance.now();
       record.endedAt = new Date().toISOString();
       record.turnStatus = params.turn.status;
+      const { items, itemsView = 'full' } = params.turn;
+      record.terminalItemsView = 'unknown';
+      if (Array.isArray(items)) {
+        if (['full', 'summary', 'notLoaded'].includes(itemsView)) record.terminalItemsView = itemsView;
+        for (const finalItem of items) observeImage(finalItem, true, itemsView !== 'full');
+      }
       const reason = params.turn.error?.codexErrorInfo;
       if (reason) record.turnErrorCode = typeof reason === 'string' ? reason : Object.keys(reason)[0];
       acceptingEvents = false;
@@ -261,7 +289,10 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
     if (completedImage) Object.assign(record, collectImage(completedImage, tempRoot, outputDir, source.id, source.sha256, allowedImageRoots));
     if (record.turnStatus !== 'completed') throw new Error('turn/completed: ' + record.turnStatus +
       (record.turnErrorCode ? ' (' + record.turnErrorCode + ')' : ''));
-    if (!record.imageToolCalled) throw new Error('本次会话未观测到图片生成工具调用，未收到有效输出');
+    if (!record.imageToolCalled) {
+      const note = record.terminalItemsView === 'full' ? '' : '。会话结束时未提供完整条目，无法确认工具是否运行';
+      throw new Error('本次会话未观测到图片生成工具调用，未收到有效输出' + note);
+    }
     if (!record.outputImage) throw new Error(record.error || '已观测到图片工具调用，但未收到有效输出');
     if (record.referenceHashMatched === false) throw new Error(`已取得图片，但图片工具记录的输入与第 ${source.id} 张原画不符。`);
     record.status = 'success';

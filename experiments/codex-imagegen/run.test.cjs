@@ -157,6 +157,70 @@ test('text-only completion never counts an image; foreign notifications are igno
   assert.ok(!record.imageToolCalled);
 });
 
+test('a tool failure reported only in the final turn items is counted and keeps its error code', async t => {
+  const { record, promise } = await turnFixture(t, (_method, _params, notify) => {
+    notify('turn/completed', { threadId: 'T', turn: { id: 'U', status: 'completed', items: [{
+      type: 'imageGeneration', id: 'I', status: 'failed', result: '', failure: { type: 'usageLimitExceeded' },
+    }] } });
+    return { turn: { id: 'U' } };
+  });
+  await assert.rejects(promise, /图片工具未成功完成/);
+  assert.equal(record.terminalItemsView, 'full');
+  assert.equal(record.imageToolCalled, true);
+  assert.equal(record.imageToolCallCount, 1);
+  assert.equal(record.imageToolFailure, 'usageLimitExceeded');
+  assert.equal(record.imageToolStatus, 'failed');
+});
+
+test('final items can deliver an image and preserve streamed bytes when the final copy is sparse', {
+  skip: process.platform !== 'darwin',
+}, async t => {
+  const item = { type: 'imageGeneration', id: 'I', status: 'completed', result: tinyPng,
+    inputImages: [{ path: '/fixture.png', sha256: 'b'.repeat(64) }] };
+  for (const view of ['terminal-only', 'full', 'summary', 'notLoaded']) {
+    const { record, outputDir, promise } = await turnFixture(t, (_method, _params, notify) => {
+      const turn = { id: 'U', status: 'completed', itemsView: 'full', items: [item] };
+      if (view !== 'terminal-only') {
+        notify('item/started', { threadId: 'T', turnId: 'U', item: { ...item, status: 'inProgress', result: '' } });
+        notify('item/completed', { threadId: 'T', turnId: 'U', item });
+        turn.itemsView = view;
+        turn.items = view === 'notLoaded' ? [] : [{ type: 'imageGeneration', id: 'I',
+          status: 'completed', fileId: 'fixture-file-id', result: '', savedPath: null, inputImages: [] }];
+      }
+      notify('turn/completed', { threadId: 'T', turn });
+      return { turn: { id: 'U' } };
+    });
+    await promise;
+    assert.equal(record.status, 'success');
+    assert.equal(record.imageToolCallCount, 1);
+    assert.equal(record.referenceHashMatched, true);
+    assert.deepEqual(await fs.readdir(outputDir), ['1-codex.png']);
+    assert.deepEqual([record.width, record.height], [4, 2]);
+  }
+});
+
+test('incomplete final item lists are identified and another turn cannot supply a tool result', async t => {
+  for (const view of ['unknown', 'notLoaded', 'summary', 'full']) {
+    const { record, promise } = await turnFixture(t, (_method, _params, notify) => {
+      notify('turn/started', { threadId: 'T', turn: { id: 'U', status: 'inProgress' } });
+      notify('turn/completed', { threadId: 'T', turn: { id: 'other', status: 'completed', items: [{
+        type: 'imageGeneration', id: 'I', status: 'completed', result: tinyPng,
+      }] } });
+      const turn = { id: 'U', status: 'completed' };
+      if (view !== 'unknown') Object.assign(turn, { items: [], itemsView: view });
+      notify('turn/completed', { threadId: 'T', turn });
+      return { turn: { id: 'U' } };
+    });
+    await assert.rejects(promise, error => {
+      assert.match(error.message, /未观测到图片生成工具调用/);
+      assert.equal(error.message.includes('完整条目'), view !== 'full');
+      return true;
+    });
+    assert.equal(record.terminalItemsView, view);
+    assert.ok(!record.imageToolCalled);
+  }
+});
+
 test('deadline interrupts only the owned turn and awaits its terminal notification', async t => {
   const { calls, record, promise } = await turnFixture(t, (method, params, notify) => {
     if (method === 'turn/start') return { turn: { id: 'U' } };

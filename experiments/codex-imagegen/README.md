@@ -10,7 +10,7 @@
 node experiments/codex-imagegen/run.cjs --first-image-once
 ```
 
-桌面端 Codex 0.171.0-alpha.13 首次连接和重连均识别到已有 ChatGPT 登录。`gpt-6.2-sol` 的图片输入、出图开关、供应商能力和普通额度预检均通过。脚本按清单校验第 1 张原画和 G3 原文，实际提交 1 次。会话在 20.283 秒后以 `completed` 结束，仅收到文字。文字称图片工具未能启动；服务未报告 `imageGeneration` 调用、工具错误码、图片或保存路径。具体原因未知。
+桌面端 Codex 0.171.0-alpha.13 首次连接和重连均识别到已有 ChatGPT 登录。`gpt-6.2-sol` 的图片输入、出图开关、供应商能力和普通额度预检均通过。脚本按清单校验第 1 张原画和 G3 原文，实际提交 1 次。会话在 20.283 秒后以 `completed` 结束，记录里只有文字回复。文字称图片工具未能启动。旧脚本未观测到单独的图片工具事件，也未保存会话结束时的条目。此次产图 0 张，真实调用情况及失败原因未知。
 
 同一 Codex 主额度窗口的已用比例从 72% 到 72%，整数读数无法分辨本次实际消耗。产图 0 张，无成功耗时、格式或尺寸。其余 4 张未测，整组成功率未验证。实验在这里停止。
 
@@ -19,6 +19,21 @@ node experiments/codex-imagegen/run.cjs --first-image-once
 启动时独占创建的 `output/codex-imagegen-2026-11-21-first-image-once/` 保留了此次结果，也阻止相同命令再次提交。目录中的 `results.json` 记录 7 项结论；`comparison.html` 显示原画、FLUX 对照及首图失败状态。
 
 ## 查询出图条件（提交 0 张）
+
+### code_mode 离线对照
+
+使用同一份经签名核验的桌面端 0.171.0-alpha.13 和随包的 `gpt-6.2-sol` 模型表（`tool_mode=code_mode_only`）。每组使用空白配置，保持图片功能开启、只读临时会话、禁止子进程。模拟供应商的 `modelProvider/capabilities/read` 返回 `imageGeneration=true`。只放行本机模拟服务端口，向它发送相同的纯文字，服务返回固定文字。两组均正常完成。
+
+| 观察项 | `code_mode=false` | `code_mode=true` |
+|---|---|---|
+| 模型请求中的 `tools` 字段 | 未提供 | 未提供 |
+| 显式图片工具声明或函数绑定 | 未见 | 未见 |
+| 动态工具查找说明 `ALL_TOOLS` | 有 | 相同 |
+| 图片提交数 / 工具调用数 | 0 / 0 | 0 / 0 |
+
+另外用随包的 `gpt-5.5` 模型表校验接收器，读到 6 个显式工具，包括看图用的 `view_image`。对目标模型，切换开关没有改变首个请求中可见的图片工具声明。动态工具清单与先前已登录的真实会话仍未知。两组均未调用模型或图片服务。观察数据在 `output/codex-offline-code-mode-8t_1rcyd/results.json`。
+
+### 零提交预检
 
 使用已通过登录复用实测的桌面端连接，在工作树根目录运行：
 
@@ -67,7 +82,7 @@ node experiments/codex-imagegen/run.cjs --limit 1
 1. 在每次运行新建的空工作目录中用 stdio 启动 `codex app-server`。发送 `initialize` 和 `initialized`，查询 `account/read`、`experimentalFeature/list`、`modelProvider/capabilities/read`、`model/list`、`account/rateLimits/read`。客户端不请求刷新凭据，只保留账号类型及相关额度窗口。
 2. 每张原画新建一个临时 `thread/start`，指定 OpenAI 供应商、只读策略、禁审批，并检查服务端回显。模型工具关闭 shell、MCP、应用、插件、hooks、网页搜索等。真正提交前，macOS 还会限制整个 app-server 的文件写入和子进程。一次性首图入口允许官方程序维护上文所列的启动状态，图片写入限于本次临时目录，网络供官方模型服务使用。系统隔离未能启用时终止。报告由父进程直接写入本工作树。
 3. `turn/start` 包含 `localImage` 和文本。外层指令固定为“调用图片生成工具，以附带图片为参考，按以下要求生成 1 张图，不要写代码、不要回复其他内容。”，其后是两个换行和原始 G3 文本。报告保存实际外层指令与 G3 哈希。
-4. 用 `item/started`、`item/completed` 中的 `imageGeneration` 判断工具调用，读取 `item/agentMessage/delta` 或完成的 `agentMessage`，记录最多 500 个字符。按线程和 turn 匹配 `turn/completed`。首事件延迟和生成总耗时从提交开始计，成功样本的总耗时截止于终态事件。5 分钟后请求 `turn/interrupt`；无法确认中断或未取得 turn ID 时关闭本次服务器。
+4. 从 `item/started`、`item/completed` 和同一轮 `turn/completed.turn.items` 读取 `imageGeneration`，按工具条目 ID 合并重复记录。报告保留调用次数、工具状态和最终条目清单的完整性；清单不完整且没有观察到工具时标为无法确认。旧报告没有最终条目，无法补判。文字回复最多保存 500 个字符，耗时从提交算到终态。5 分钟后请求中断，无法确认中断或未取得 turn ID 时关闭本次服务器。
 5. `imageGeneration.inputImages[].sha256` 与原画一致且取得可解码结果时，可确认生成工具使用了该原画。老版本可能缺少这个字段，届时只能记录附图请求成功返回图片，视觉效果仍需对照。优先解码内联 `result`，其次使用临时目录内的 `savedPath`。系统解码实际像素后记录格式、宽高和副本路径。只有 fileId 或临时目录外的路径时，记录缺失原因。服务端若强制把图片写入自己的常规缓存，隔离策略可能使这次生成失败。
 6. 单张提交前后分别读取限额。只比较同一桶、同一重置时间、同一长度的窗口。差值是账号窗口的整数百分点，同时使用账号、显示精度和读数延迟都会影响结果。差值为零也无法证明出图免费。
 
@@ -101,4 +116,4 @@ node experiments/codex-imagegen/run.cjs --limit 1
 node --test experiments/codex-imagegen/*.test.cjs
 ```
 
-系统拒绝叠加 sandbox 时，一项实际写入与执行限制的测试会标为跳过。在普通 macOS 进程中，同一测试已用模拟 CLI 验证临时目录内可写、目录外禁止写入、其他命令无法执行。
+本轮共 47 项测试。开发环境通过 44 项，涉及 macOS 进程隔离的 3 项使用模拟程序在普通 macOS 权限下另外通过。
