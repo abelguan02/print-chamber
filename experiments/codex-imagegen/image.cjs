@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { createHash } = require('node:crypto');
 
 const pngSignature = Buffer.from('89504e470d0a1a0a', 'hex');
 const pngEnd = Buffer.from('0000000049454e44ae426082', 'hex');
@@ -15,7 +16,10 @@ function identify(bytes) {
   throw new Error('图片内容不完整或格式不受支持');
 }
 
-function verifyAndCopy(bytes, tempRoot, outputDir, id) {
+function verifyAndCopy(bytes, tempRoot, outputDir, id, sourceSha) {
+  if (createHash('sha256').update(bytes).digest('hex') === sourceSha.toLowerCase()) {
+    throw new Error('工具返回的图片与原画逐字节相同，未取得重绘结果');
+  }
   const format = identify(bytes);
   const scratch = fs.mkdtempSync(path.join(tempRoot, 'image-check-'));
   try {
@@ -100,12 +104,12 @@ function collectImage(item, tempRoot, outputDir, id, sourceSha, allowedRoots = [
     try {
       const bytes = Buffer.from(item.result, 'base64');
       if (bytes.toString('base64') !== item.result) throw new Error('内联图片编码无效');
-      return Object.assign(record, verifyAndCopy(bytes, tempRoot, outputDir, id));
+      return Object.assign(record, verifyAndCopy(bytes, tempRoot, outputDir, id, sourceSha));
     } catch (error) { errors.push(error.message); }
   }
   if (localFile?.allowed) {
     try {
-      return Object.assign(record, verifyAndCopy(readConfined(localFile.physical), tempRoot, outputDir, id));
+      return Object.assign(record, verifyAndCopy(readConfined(localFile.physical), tempRoot, outputDir, id, sourceSha));
     } catch (error) {
       errors.push(error.code ? `无法安全读取或保存图片（${error.code}）` : error.message);
     }
@@ -113,6 +117,8 @@ function collectImage(item, tempRoot, outputDir, id, sourceSha, allowedRoots = [
     errors.push('上报路径不在本次允许读取的图片目录，已拒绝访问');
   } else if (reportedPath) {
     errors.push('上报路径在临时目录之外或无效，已拒绝访问');
+  } else if (item.fileId && !item.result) {
+    errors.push('图片工具只返回了附件编号，没有返回图片内容或本次临时目录里的文件');
   }
   record.error = errors.join('；') || '工具未返回可取得的图片内容';
   return record;

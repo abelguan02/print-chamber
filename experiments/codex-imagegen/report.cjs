@@ -163,7 +163,7 @@ function collectFindings(results) {
     },
     {
       question: '本机最小可用性检测步骤？',
-      answer: '运行 node experiments/codex-imagegen/run.cjs --dry-run，使用日常 Codex 和已有配置完成握手、查询 account/read，关闭后按相同设置重新连接。两次都返回 chatgpt 才确认复用了现有登录，此时 existingLogin.verified 为 true。再检查 image_generation 已启用、供应商明确支持出图、模型明确支持图片输入和账号额度未明确拒绝。preflight.ready 为 true 时才可尝试首图。额度读数缺失时，实际可用额度未知。实际出图需另有图片工具的完成事件及可解码图片。工具提供输入哈希时须与原画匹配，缺少哈希时需人工对比主体和构图。',
+      answer: '使用 --check-existing-login 确认桌面端 Codex 两次连接均返回 chatgpt，再使用 --check-image-capability 查询出图开关、供应商能力、模型图片输入及额度。两项均提交 0 张。单次首图入口会在自己的出图权限下重新检查登录与能力，明确有可用普通额度后才提交。实际出图需另有图片工具的完成事件及可解码图片。工具提供输入哈希时须与原画匹配，缺少哈希时需人工对比主体和构图。',
     },
   ];
   return questions.map((finding, i) => ({ number: i + 1, ...finding }));

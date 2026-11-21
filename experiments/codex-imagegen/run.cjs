@@ -7,7 +7,7 @@ const { execFileSync } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
 const { AppServerClient } = require('./client.cjs');
 const { loadDataset, prepareSample, writeReport } = require('./report.cjs');
-const { isolateGeneration, isolateLoginCheck } = require('./isolation.cjs');
+const { isolateGeneration, isolateLoginCheck, isolateDesktopImage } = require('./isolation.cjs');
 const { findDesktopCli } = require('./desktop-cli.cjs');
 const { collectImage } = require('./image.cjs');
 const { temporaryLoginEnvironment, loginInTerminal } = require('./login-check.cjs');
@@ -33,13 +33,14 @@ function modeFrom(args) {
   if (!args.length || (args.length === 1 && args[0] === '--dry-run')) return { name: 'dry-run', count: 0 };
   if (args.length === 1 && args[0] === '--check-existing-login') return { name: 'check-existing-login', count: 0 };
   if (args.length === 1 && args[0] === '--check-image-capability') return { name: 'check-image-capability', count: 0 };
+  if (args.length === 1 && args[0] === '--first-image-once') return { name: 'first-image-once', count: 1 };
   if (args.length === 1 && args[0] === '--login-check') return { name: 'login-check', count: 0 };
   if (args.length === 1 && args[0] === '--login-first-image') return { name: 'login-first-image', count: 1 };
   if (args.length === 1 && args[0] === '--all') return { name: 'all', count: 5 };
   if (args.length === 2 && args[0] === '--limit' && /^[1-5]$/.test(args[1])) {
     return { name: 'limit', count: Number(args[1]) };
   }
-  throw new Error('请选择 --dry-run、--check-existing-login、--check-image-capability、--login-check、--login-first-image、--limit 1 至 5 或 --all，各模式不能混用。');
+  throw new Error('请选择 --dry-run、--check-existing-login、--check-image-capability、--first-image-once、--login-check、--login-first-image、--limit 1 至 5 或 --all，各模式不能混用。');
 }
 
 function childEnvironment(tempRoot) {
@@ -50,8 +51,8 @@ function childEnvironment(tempRoot) {
   return env;
 }
 
-async function findDataset() {
-  if (process.env.PRINT_CHAMBER_G3_DIR) return path.resolve(process.env.PRINT_CHAMBER_G3_DIR);
+async function findDataset(projectOnly) {
+  if (!projectOnly && process.env.PRINT_CHAMBER_G3_DIR) return path.resolve(process.env.PRINT_CHAMBER_G3_DIR);
   const local = path.join(ROOT, DATA);
   try { await fs.access(local); return local; }
   catch (error) { if (error.code !== 'ENOENT') throw error; }
@@ -146,23 +147,32 @@ async function preflight(client, checks, failureModes) {
   if (!checks.model) checks.issues.models ??= '未找到支持图片输入的模型。';
   if (checks.imageGeneration !== true) checks.issues.imageGeneration ??= '未确认图片生成功能已开启。';
   if (checks.providerImageGeneration !== true) checks.issues.providerImageGeneration ??= '未确认供应商支持图片生成。';
-  if (checks.rateLimits?.ordinaryUsageAllowed === false) checks.issues.quota = '账号报告当前额度受限。';
-  checks.ready = checks.rateLimits?.ordinaryUsageAllowed !== false && checks.accountType === 'chatgpt' &&
+  const quota = quotaState(checks.rateLimits);
+  if (quota.blocked) checks.issues.quota = '账号报告当前额度受限。';
+  checks.ready = !quota.blocked && checks.accountType === 'chatgpt' &&
     checks.imageGeneration === true && checks.providerImageGeneration === true && !!checks.model;
 }
 
-function summarizeCapabilities(checks, completed) {
-  const limits = checks.rateLimits;
-  const permission = limits?.ordinaryUsageAllowed;
+function quotaState(limits) {
   const codexBucket = limits?.rateLimitsByLimitId?.codex ??
     (limits?.rateLimits?.limitId === 'codex' ? limits.rateLimits : null);
   const codexLimitReason = codexBucket?.rateLimitReachedType ?? null;
+  const codexSpendControlReached = codexBucket?.spendControlReached ?? null;
+  const permission = limits?.ordinaryUsageAllowed;
+  return {
+    blocked: permission === false || codexLimitReason !== null || codexSpendControlReached === true,
+    quotaStatus: permission === true ? 'allowed' : permission === false ? 'blocked' : 'unknown',
+    codexLimitReason, codexSpendControlReached,
+  };
+}
+
+function summarizeCapabilities(checks, completed) {
+  const { quotaStatus, codexLimitReason, codexSpendControlReached } = quotaState(checks.rateLimits);
   return {
     handshake: checks.handshake, accountType: checks.accountType ?? null,
     imageGeneration: checks.imageGeneration ?? null, providerImageGeneration: checks.providerImageGeneration ?? null,
-    model: checks.model ?? null, quotaStatus: permission === true ? 'allowed' : permission === false ? 'blocked' : 'unknown',
-    codexLimitReason, codexSpendControlReached: codexBucket?.spendControlReached ?? null,
-    ready: completed && checks.ready && codexLimitReason === null, issues: checks.issues,
+    model: checks.model ?? null, quotaStatus, codexLimitReason, codexSpendControlReached,
+    ready: completed && checks.ready, issues: checks.issues,
   };
 }
 
@@ -178,14 +188,17 @@ function newRecord(source) {
 }
 
 // Only one fresh thread is active. Notifications can precede the turn/start reply.
-async function runTurn({ client, listen, record, source, prompt, model, tempRoot, cwd, outputDir, allowedImageRoots, timeoutMs = TURN_MS }) {
+async function runTurn({ client, listen, record, source, prompt, model, tempRoot, cwd, outputDir,
+  inputPath = path.join(outputDir, record.sourceImage), allowedImageRoots, singleAttempt = false, timeoutMs = TURN_MS }) {
   const thread = await client.request('thread/start', {
     cwd, sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true, modelProvider: 'openai', model,
+    ...(singleAttempt && { developerInstructions: '图片生成工具最多调用一次。成功、失败或未返回图片时均结束本轮，禁止重试或改用其他工具。' }),
   });
   if (thread.approvalPolicy !== 'never' || thread.sandbox?.type !== 'readOnly' ||
       thread.sandbox.networkAccess === true || thread.modelProvider !== 'openai') {
     throw new Error('服务端未确认只读、禁审批、受限联网与 OpenAI 供应商；未提交原画。');
   }
+  if (singleAttempt && thread.model !== model) throw new Error('服务端未确认预检通过的图片输入模型，未提交原画。');
   const threadId = thread.thread.id;
   let turnId;
   let finished;
@@ -235,7 +248,7 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
     const submit = client.request('turn/start', {
       threadId, input: [
         { type: 'text', text: INSTRUCTION + '\n\n' + prompt },
-        { type: 'localImage', path: path.join(outputDir, record.sourceImage) },
+        { type: 'localImage', path: inputPath },
       ],
     }, timeoutMs + 1000).then(response => {
       if (turnId && turnId !== response.turn.id) throw new Error('turn/start 返回了不同的 turn ID');
@@ -278,6 +291,7 @@ async function run(mode) {
   const loginCheck = mode.name === 'login-check';
   const existingLoginOnly = mode.name === 'check-existing-login';
   const capabilityOnly = mode.name === 'check-image-capability';
+  const desktopImage = mode.name === 'first-image-once';
   const desktopQuery = existingLoginOnly || capabilityOnly;
   const firstImage = mode.name === 'login-first-image';
   const temporaryLogin = loginCheck || firstImage;
@@ -289,8 +303,20 @@ async function run(mode) {
   const outputPrefix = {
     'check-existing-login': 'codex-existing-login-', 'check-image-capability': 'codex-image-capability-',
   }[mode.name] ?? 'codex-imagegen-';
-  const outputDir = await fs.mkdtemp(path.join(outputParent, outputPrefix +
-    new Date().toISOString().replace(/[:.]/g, '-') + '-'));
+  let outputDir;
+  if (desktopImage) {
+    // One report directory for this grant. Atomic even across concurrent invocations,
+    // and kept after cancellation, failed preflight, ambiguous delivery, or success.
+    outputDir = path.join(outputParent, 'codex-imagegen-2026-11-21-first-image-once');
+    try { await fs.mkdir(outputDir, { mode: 0o700 }); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      throw new Error('这次授权已使用，本次没有再次提交。原报告目录 ' + outputDir);
+    }
+  } else {
+    outputDir = await fs.mkdtemp(path.join(outputParent, outputPrefix +
+      new Date().toISOString().replace(/[:.]/g, '-') + '-'));
+  }
   const results = {
     mode: mode.name, requestedSamples: mode.count, environment: {
       codexVersion: null, nodeVersion: process.version, platform: process.platform, outerInstruction: INSTRUCTION, g3Sha256: null,
@@ -313,7 +339,7 @@ async function run(mode) {
   async function execute() {
     if (!loginCheck && !desktopQuery) {
       try {
-        datasetDir = await findDataset();
+        datasetDir = await findDataset(desktopImage);
         dataset = await loadDataset(datasetDir);
         results.environment.g3Sha256 = dataset.g3Sha256;
         if (dataset.g3Sha256 !== G3_SHA256) throw new Error('G3 提示词与已确认版本的 SHA-256 不匹配');
@@ -340,7 +366,7 @@ async function run(mode) {
     const cliPath = await findDesktopCli();
     results.environment.codexSource = 'chatgpt-desktop-bundle';
     results.environment.codexExecutable = cliPath;
-    const isolate = desktopQuery ? isolateLoginCheck : isolateGeneration;
+    const isolate = desktopImage ? isolateDesktopImage : desktopQuery ? isolateLoginCheck : isolateGeneration;
     const env = await isolate(tempRoot, baseEnv, cliPath);
     results.environment.codexVersion = execFileSync('codex', ['--version'], {
       cwd, env, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'],
@@ -381,27 +407,40 @@ async function run(mode) {
     if (results.existingLogin) results.existingLogin.reconnect.started = true;
     if (existingLoginOnly) await confirmChatgpt(client, activeCheck, results.failureModes);
     else await preflight(client, results.preflight, results.failureModes);
-    let quotaBlocked = results.preflight.rateLimits?.ordinaryUsageAllowed === false;
+    if (desktopImage && results.preflight.rateLimits?.ordinaryUsageAllowed !== true) {
+      results.preflight.ready = false;
+      results.preflight.issues.quota ??= '未确认普通额度可用，未提交首图。';
+    }
+    let quotaBlocked = quotaState(results.preflight.rateLimits).blocked;
     for (const record of results.records) {
       if (record.error) continue;
       if (quotaBlocked) { record.error = '账号已报告当前额度受限，未提交本张原画。'; continue; }
       if (!results.preflight.ready || cancellation.signal.aborted) {
-        record.error = results.preflight.issues.providerImageGeneration ?? '预检未就绪或已终止，未提交本张原画。';
+        record.error = Object.values(results.preflight.issues).join(' ') || '预检未就绪或已终止，未提交本张原画。';
         continue;
       }
       const source = dataset.sources[record.id - 1];
       try { record.rateLimitsBefore = await readLimits(client); }
       catch (error) { record.rateLimitErrors.before = error.message; }
-      if (record.rateLimitsBefore?.ordinaryUsageAllowed === false) {
+      if (quotaState(record.rateLimitsBefore).blocked) {
         quotaBlocked = true;
         record.error = '提交前账号已拒绝额度，未出图。';
+        continue;
+      }
+      if (desktopImage && record.rateLimitsBefore?.ordinaryUsageAllowed !== true) {
+        record.error = '提交前未能确认普通额度可用，已停止。';
         continue;
       }
       cancellation.signal.throwIfAborted();
       if (mode.count === 1) console.log((firstImage ? '登录预检通过' : '两次连接均识别到已有 ChatGPT 登录') + '，正在处理第 1 张原画。');
       try {
+        let inputPath;
+        if (desktopImage) {
+          inputPath = path.join(cwd, record.sourceImage);
+          await fs.copyFile(path.join(outputDir, record.sourceImage), inputPath, fs.constants.COPYFILE_EXCL);
+        }
         await runTurn({ client, listen, record, source, prompt: dataset.g3,
-          model: results.preflight.model, tempRoot, cwd, outputDir,
+          model: results.preflight.model, tempRoot, cwd, outputDir, inputPath, singleAttempt: desktopImage,
           allowedImageRoots: firstImage ? [cwd, path.join(baseEnv.CODEX_HOME, 'generated_images')] : undefined });
       } catch (error) {
         record.status = record.attempted ? 'failed' : 'skipped';
@@ -413,7 +452,7 @@ async function run(mode) {
       }
       try { record.rateLimitsAfter = await readLimits(client); }
       catch (error) { record.rateLimitErrors.after = error.message; }
-      if (record.rateLimitsAfter?.ordinaryUsageAllowed === false) quotaBlocked = true;
+      if (quotaState(record.rateLimitsAfter).blocked) quotaBlocked = true;
     }
   }
   try {

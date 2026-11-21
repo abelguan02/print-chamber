@@ -55,6 +55,19 @@ test('accepts a confined nested file and prefers valid inline data', { skip: pro
   assert.equal(preferred.format, 'PNG');
 });
 
+test('the staged reference cannot be accepted as a redraw through either output channel', t => {
+  const { temp, output } = setup(t);
+  const original = Buffer.from(fixtures.PNG, 'base64');
+  const sourceHash = require('node:crypto').createHash('sha256').update(original).digest('hex');
+  const savedPath = path.join(temp, 'reference.png');
+  fs.writeFileSync(savedPath, original);
+  for (const item of [{ result: fixtures.PNG }, { savedPath }]) {
+    const record = collectImage({ ...complete, ...item }, temp, output, 1, sourceHash);
+    assert.match(record.error, /与原画逐字节相同/);
+    assert.equal(record.outputImage, null);
+  }
+});
+
 test('rejects external, traversal, symbolic links, hard links and loops', { skip: process.platform !== 'darwin' }, t => {
   const { dir, temp, output, collect } = setup(t);
   const external = path.join(dir, 'external');

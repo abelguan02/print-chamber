@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
+const vm = require('node:vm');
 const { INSTRUCTION, modeFrom, preflight, runTurn } = require('./run.cjs');
 const { writeReport } = require('./report.cjs');
 
@@ -21,6 +23,8 @@ test('default is dry and ambiguous or out-of-range options fail before launching
   }
   assert.deepEqual(modeFrom(['--login-check']), { name: 'login-check', count: 0 });
   assert.deepEqual(modeFrom(['--login-first-image']), { name: 'login-first-image', count: 1 });
+  assert.deepEqual(modeFrom(['--first-image-once']), { name: 'first-image-once', count: 1 });
+  assert.throws(() => modeFrom(['--first-image-once', '--all']));
   for (const args of [['--login-first-image', '--all'], ['--login-first-image', '--limit', '2'], ['--login-check', '--limit', '1'], ['--login-check', '--all'], ['--limit', '0'], ['--limit', '6'], ['--all', '--dry-run'], ['--limit']]) {
     assert.throws(() => modeFrom(args));
   }
@@ -199,7 +203,7 @@ test('the default dry run stops before handshake when the generation launcher is
 
 async function runProbeFixture(t, {
   accounts, flag, providerSupport = true, inputModalities = ['image'], ordinaryUsageAllowed = null,
-  rateLimits = {}, rateLimitsByLimitId = null,
+  rateLimits = {}, rateLimitsByLimitId = null, spendLimitBeforeTurn = false, imageToolCalled = true,
 }) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pc-session-reuse-')));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -212,7 +216,28 @@ async function runProbeFixture(t, {
   const cli = path.join(root, 'codex');
   const trace = path.join(root, 'methods');
   await fs.writeFile(trace, '');
-  if (flag) {
+  const singleImage = flag === '--first-image-once';
+  let prompt, sourceHash;
+  if (singleImage) {
+    const dataset = path.join(root, 'output', 'scenes-g3-20261025-060950');
+    await fs.mkdir(dataset, { recursive: true });
+    const context = {};
+    vm.runInNewContext(await fs.readFile(path.join(__dirname, '../../extension/cloud-prompt.js'), 'utf8'), context);
+    prompt = context.CLOUD_PROMPT;
+    const pixels = await fs.readFile(path.join(__dirname, '../../tests/fixtures/artwork.png'));
+    sourceHash = createHash('sha256').update(pixels).digest('hex');
+    const sources = Array.from({ length: 5 }, (_, i) => ({
+      id: i + 1, path: path.join(root, `sample-${i + 1}.png`), sha256: sourceHash,
+    }));
+    // Only the authorized sample has files. Any attempt to load another will fail.
+    await Promise.all([
+      fs.writeFile(path.join(dataset, 'prompt.txt'), prompt),
+      fs.writeFile(path.join(dataset, 'metrics.json'), JSON.stringify({ sources })),
+      fs.writeFile(sources[0].path, pixels),
+      fs.writeFile(path.join(dataset, '1-G3.png'), pixels),
+    ]);
+  }
+  if (flag && !singleImage) {
     await fs.writeFile(path.join(dir, 'report.cjs'), `
       exports.loadDataset = async () => { require('node:fs').appendFileSync(${JSON.stringify(trace)}, '{"method":"dataset"}\\n'); };
     `);
@@ -224,7 +249,7 @@ async function runProbeFixture(t, {
     const file = ${JSON.stringify(trace)};
     const log = entry => fs.appendFileSync(file, JSON.stringify(entry) + '\\n');
     const command = process.argv[2];
-    if (command === '--version') console.log('fixture CLI');
+    if (command === '--version') console.log('codex-cli 0.171.0-alpha.13');
     else if (command === 'app-server') {
       const previous = fs.readFileSync(file, 'utf8').trim().split('\\n').filter(Boolean).map(JSON.parse);
       const type = ${JSON.stringify(accounts)}[previous.filter(r => r.method === 'start').length];
@@ -237,6 +262,7 @@ async function runProbeFixture(t, {
           ordinaryUsageAllowed, rateLimits, rateLimitsByLimitId, accountId: 'unused@example.invalid',
         })},
       };
+      let limitsRead = 0;
       log({method:'start', profile:process.env.CODEX_HOME, cwd:process.cwd(), args:process.argv.slice(2)});
       process.on('exit', () => {
         log({method:'end'});
@@ -244,34 +270,126 @@ async function runProbeFixture(t, {
       });
       require('node:readline').createInterface({input:process.stdin}).on('line', line => {
         const {id, method, params} = JSON.parse(line);
+        if (method === 'thread/start') {
+          log({method, model:params.model, sandbox:params.sandbox, approvalPolicy:params.approvalPolicy, ephemeral:params.ephemeral});
+          console.log(JSON.stringify({id, result:{thread:{id:'T'}, model:params.model, modelProvider:'openai',
+            approvalPolicy:'never', sandbox:{type:'readOnly', networkAccess:false}}}));
+          return;
+        }
+        if (method === 'turn/start') {
+          const reference = params.input.find(item => item.type === 'localImage');
+          const sha256 = require('node:crypto').createHash('sha256').update(fs.readFileSync(reference.path)).digest('hex');
+          log({method, sha256, attachedFromWork:require('node:path').dirname(reference.path) === process.cwd(),
+            inputTypes:params.input.map(item => item.type), text:params.input.find(item => item.type === 'text').text});
+          console.log(JSON.stringify({id, result:{turn:{id:'U'}}}));
+          const send = (method, params) => console.log(JSON.stringify({method, params}));
+          if (${JSON.stringify(imageToolCalled)}) {
+            const savedPath = require('node:path').join(process.cwd(), 'generated.png');
+            fs.writeFileSync(savedPath, Buffer.from(${JSON.stringify(tinyPng)}, 'base64'));
+            send('item/completed', {threadId:'T', turnId:'U', item:{
+              type:'imageGeneration', id:'I', status:'completed', generationId:'G', savedPath, inputImages:[{path:reference.path, sha256}],
+            }});
+          }
+          send('turn/completed', {threadId:'T', turn:{id:'U', status:'completed'}});
+          return;
+        }
         log({method});
         if (method === 'initialized') return;
         if (!Object.hasOwn(methods, method)) process.exit(8);
         if (method === 'account/read' && (params.refreshToken !== false || Object.keys(params).length !== 1)) process.exit(9);
         if (method === 'account/read' && type === 'disconnect') process.exit(3);
+        if (method === 'account/rateLimits/read' && ++limitsRead === 2 && ${JSON.stringify(spendLimitBeforeTurn)}) {
+          methods[method].rateLimitsByLimitId = {codex:{limitId:'codex', spendControlReached:true}};
+        }
         console.log(JSON.stringify({id, result:methods[method]}));
       });
     } else { log({method:command}); process.exit(7); }
   `, { mode: 0o700 });
   await fs.writeFile(path.join(dir, 'desktop-cli.cjs'), `exports.findDesktopCli = async () => ${JSON.stringify(cli)};`);
+  const launcher = singleImage ? 'isolateDesktopImage' : flag ? 'isolateLoginCheck' : 'isolateGeneration';
   await fs.writeFile(path.join(dir, 'isolation.cjs'), `
-    exports.${flag ? 'isolateLoginCheck' : 'isolateGeneration'} = async (_root, env, cli) => {
+    exports.${launcher} = async (_root, env, cli) => {
       if (cli !== ${JSON.stringify(cli)}) throw new Error('unexpected executable');
       return env;
     };
   `);
   const profile = path.join(root, 'existing-user');
   const flags = flag ? [flag] : [];
-  const result = require('node:child_process').spawnSync(process.execPath, [path.join(dir, 'run.cjs'), ...flags], {
+  const invoke = () => require('node:child_process').spawnSync(process.execPath, [path.join(dir, 'run.cjs'), ...flags], {
     cwd: root, encoding: 'utf8', timeout: 8000,
     env: { PATH: root, HOME: root, CODEX_HOME: profile, TMPDIR: root, PRINT_CHAMBER_G3_DIR: root },
   });
-  const [reportDir] = await fs.readdir(path.join(root, 'output'));
-  const outputDir = path.join(root, 'output', reportDir);
+  const result = invoke();
+  const outputDir = result.stdout.match(/^报告 (.+)$/m)?.[1];
+  assert.ok(outputDir, result.stderr || result.stdout);
   const report = JSON.parse(await fs.readFile(path.join(outputDir, 'results.json')));
-  const entries = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
-  return { result, report, entries, profile, cli, outputDir };
+  const readTrace = async () => (await fs.readFile(trace, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
+  const entries = await readTrace();
+  return { result, report, entries, profile, cli, outputDir, invoke, readTrace, prompt, sourceHash };
 }
+
+test('one desktop image authorization submits only the first verified reference, then stays consumed', {
+  skip: process.platform !== 'darwin',
+}, async t => {
+  const fixture = await runProbeFixture(t, {
+    accounts: ['chatgpt', 'chatgpt'], flag: '--first-image-once', ordinaryUsageAllowed: true,
+  });
+  const { result, report, entries, profile, invoke, readTrace, prompt, sourceHash } = fixture;
+  assert.equal(result.status, 0, result.stderr);
+  const starts = entries.filter(e => e.method === 'start');
+  assert.equal(starts.length, 2);
+  assert.equal(starts[0].profile, profile);
+  assert.deepEqual(starts[0], starts[1]);
+  assert.equal(report.existingLogin.verified, true);
+  assert.deepEqual(entries.filter(e => e.method === 'thread/start'), [{
+    method: 'thread/start', model: 'fixture', sandbox: 'read-only', approvalPolicy: 'never', ephemeral: true,
+  }]);
+  assert.deepEqual(entries.filter(e => e.method === 'turn/start'), [{
+    method: 'turn/start', sha256: sourceHash, attachedFromWork: true,
+    inputTypes: ['text', 'localImage'], text: INSTRUCTION + '\n\n' + prompt,
+  }]);
+  assert.equal(report.records.length, 1);
+  assert.equal(report.records[0].id, 1);
+  assert.equal(report.records[0].status, 'success');
+  assert.equal(report.records[0].referenceHashMatched, true);
+  assert.deepEqual([report.records[0].width, report.records[0].height], [4, 2]);
+  assert.equal(invoke().status, 1);
+  assert.deepEqual(await readTrace(), entries);
+});
+
+test('login and quota failures consume the one-shot authorization without starting a turn', async t => {
+  const cases = [
+    { accounts: ['chatgpt', null] },
+    { ordinaryUsageAllowed: null },
+    { rateLimitsByLimitId: { codex: { limitId: 'codex', rateLimitReachedType: 'rate_limit_reached' } } },
+    { spendLimitBeforeTurn: true },
+  ];
+  for (const scenario of cases) {
+    const { result, entries, report, invoke, readTrace } = await runProbeFixture(t, {
+      accounts: ['chatgpt', 'chatgpt'], flag: '--first-image-once', ordinaryUsageAllowed: true, ...scenario,
+    });
+    assert.equal(result.status, 1, result.stdout);
+    assert.equal(entries.filter(e => e.method === 'start').length, 2);
+    assert.ok(!entries.some(e => ['login', 'thread/start', 'turn/start'].includes(e.method)));
+    assert.equal(report.records[0].attempted, false);
+    assert.ok(report.records[0].error);
+    assert.equal(invoke().status, 1);
+    assert.deepEqual(await readTrace(), entries);
+  }
+});
+
+test('a completed desktop turn with no image consumes the authorization and cannot submit again', async t => {
+  const { result, entries, report, invoke, readTrace } = await runProbeFixture(t, {
+    accounts: ['chatgpt', 'chatgpt'], flag: '--first-image-once', ordinaryUsageAllowed: true, imageToolCalled: false,
+  });
+  assert.equal(result.status, 1, result.stdout);
+  assert.equal(entries.filter(e => e.method === 'turn/start').length, 1);
+  assert.equal(report.records[0].attempted, true);
+  assert.equal(report.records[0].status, 'failed');
+  assert.equal(report.records[0].outputImage, null);
+  assert.equal(invoke().status, 1);
+  assert.deepEqual(await readTrace(), entries);
+});
 
 test('daily sessions reconnect to the same profile and stop immediately if either connection lacks a login', async t => {
   const normalCases = [['chatgpt', 'chatgpt'], ['chatgpt', null], [null]];

@@ -12,6 +12,12 @@ const generationRules = `(deny file-write*)
 (allow file-write* (subpath (param "RUN_DIR")))
 (allow file-write-data (literal "/dev/null"))
 (deny process-fork)`;
+const desktopImageRules = `${generationRules}
+(allow file-write-create file-write-data (require-all
+  (vnode-type REGULAR-FILE) (literal (param "INSTALLATION_ID"))))
+(allow file-write-create file-write-mode (require-all
+  (vnode-type DIRECTORY) (literal (param "CODEX_TMP"))))
+(allow file-write* (subpath (param "ARG0_DIR")))`;
 
 function shellQuote(value) {
   return "'" + value.replaceAll("'", "'\\''") + "'";
@@ -29,7 +35,7 @@ async function verifyOfficialCodex(cli) {
   }
 }
 
-async function createLauncher(tempRoot, baseEnv, cli, verify, extraRules) {
+async function createLauncher(tempRoot, baseEnv, cli, verify, extraRules, stateParams = []) {
   if (process.platform !== 'darwin') {
     throw new Error('本机 Codex 启动器需要 macOS。');
   }
@@ -38,7 +44,9 @@ async function createLauncher(tempRoot, baseEnv, cli, verify, extraRules) {
   const file = path.join(binDir, 'launcher.sb');
   const profile = ['(version 1)', '(allow default)', extraRules, execRules, ''].join('\n');
   await fs.writeFile(file, profile, { mode: 0o600 });
-  const policy = executable => ['-D', 'RUN_DIR=' + runDir, '-D', 'CLI=' + executable, '-f', file, executable];
+  const policy = executable => [
+    '-D', 'RUN_DIR=' + runDir, '-D', 'CLI=' + executable, ...stateParams, '-f', file, executable,
+  ];
   try {
     await promisify(execFile)(seatbelt, policy('/usr/bin/true'), {
       cwd: runDir, env: { PATH: '/usr/bin:/bin' }, timeout: 5000,
@@ -68,4 +76,18 @@ function isolateLoginCheck(tempRoot, baseEnv, cli, verify = verifyOfficialCodex)
   return createLauncher(tempRoot, baseEnv, cli, verify, '');
 }
 
-module.exports = { isolateGeneration, isolateLoginCheck };
+function isolateDesktopImage(tempRoot, baseEnv, cli, verify = verifyOfficialCodex) {
+  const stateDir = baseEnv.CODEX_HOME || (baseEnv.HOME && path.join(baseEnv.HOME, '.codex'));
+  if (!stateDir || !path.isAbsolute(stateDir)) {
+    throw new Error('无法确认桌面 Codex 的运行目录，已在启动前停止。');
+  }
+  // Derive sandbox filters without opening or resolving the user's state directory.
+  const tmp = path.join(stateDir, 'tmp');
+  return createLauncher(tempRoot, baseEnv, cli, verify, desktopImageRules, [
+    '-D', 'INSTALLATION_ID=' + path.join(stateDir, 'installation_id'),
+    '-D', 'CODEX_TMP=' + tmp,
+    '-D', 'ARG0_DIR=' + path.join(tmp, 'arg0-macos'),
+  ]);
+}
+
+module.exports = { isolateGeneration, isolateLoginCheck, isolateDesktopImage };

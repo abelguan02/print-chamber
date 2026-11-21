@@ -98,12 +98,13 @@ async function firstImageDataset(dir) {
   const scope = {};
   require('node:vm').runInNewContext(await fs.readFile(require.resolve('../../extension/cloud-prompt.js'), 'utf8'), scope);
   await fs.writeFile(path.join(dir, 'prompt.txt'), scope.CLOUD_PROMPT);
-  const sha256 = createHash('sha256').update(png).digest('hex');
+  const original = await fs.readFile(path.join(__dirname, '../../tests/fixtures/artwork.png'));
+  const sha256 = createHash('sha256').update(original).digest('hex');
   const sources = Array.from({ length: 5 }, (_, i) => ({
     id: i + 1, sha256, path: path.join(dir, 'source-' + (i + 1) + '.png'),
   }));
   await fs.writeFile(path.join(dir, 'metrics.json'), JSON.stringify({ sources }));
-  await fs.writeFile(sources[0].path, png);
+  await fs.writeFile(sources[0].path, original);
   await fs.writeFile(path.join(dir, '1-G3.png'), png);
 }
 
@@ -148,7 +149,7 @@ async function runLoginMode(t, mode) {
           const imageDir = path.join(process.env.CODEX_HOME, 'generated_images');
           fs.mkdirSync(imageDir, {recursive:true});
           const savedPath = path.join(imageDir, 'fixture.png');
-          fs.writeFileSync(savedPath, bytes);
+          fs.writeFileSync(savedPath, Buffer.from(${JSON.stringify(png.toString('base64'))}, 'base64'));
           console.log(JSON.stringify({method:'item/completed', params:{threadId:'T', turnId:'U',
             item:{type:'imageGeneration', status:'completed', savedPath, inputImages:[{sha256}]}}}));
           console.log(JSON.stringify({method:'turn/completed', params:{threadId:'T',turn:{id:'U',status:'completed'}}}));
