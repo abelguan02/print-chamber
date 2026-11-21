@@ -32,13 +32,14 @@ const SERVER_ARGS = [
 function modeFrom(args) {
   if (!args.length || (args.length === 1 && args[0] === '--dry-run')) return { name: 'dry-run', count: 0 };
   if (args.length === 1 && args[0] === '--check-existing-login') return { name: 'check-existing-login', count: 0 };
+  if (args.length === 1 && args[0] === '--check-image-capability') return { name: 'check-image-capability', count: 0 };
   if (args.length === 1 && args[0] === '--login-check') return { name: 'login-check', count: 0 };
   if (args.length === 1 && args[0] === '--login-first-image') return { name: 'login-first-image', count: 1 };
   if (args.length === 1 && args[0] === '--all') return { name: 'all', count: 5 };
   if (args.length === 2 && args[0] === '--limit' && /^[1-5]$/.test(args[1])) {
     return { name: 'limit', count: Number(args[1]) };
   }
-  throw new Error('请选择 --dry-run、--check-existing-login、--login-check、--login-first-image、--limit 1 至 5 或 --all，各模式不能混用。');
+  throw new Error('请选择 --dry-run、--check-existing-login、--check-image-capability、--login-check、--login-first-image、--limit 1 至 5 或 --all，各模式不能混用。');
 }
 
 function childEnvironment(tempRoot) {
@@ -86,7 +87,7 @@ async function readLimits(client) {
       } : null;
     }
     return {
-      limitId: bucket.limitId, rateLimitReachedType: bucket.rateLimitReachedType,
+      limitId: bucket.limitId, rateLimitReachedType: bucket.rateLimitReachedType, spendControlReached: bucket.spendControlReached,
       credits: bucket.credits ? {
         hasCredits: bucket.credits.hasCredits, unlimited: bucket.credits.unlimited, balance: bucket.credits.balance,
       } : null,
@@ -148,6 +149,21 @@ async function preflight(client, checks, failureModes) {
   if (checks.rateLimits?.ordinaryUsageAllowed === false) checks.issues.quota = '账号报告当前额度受限。';
   checks.ready = checks.rateLimits?.ordinaryUsageAllowed !== false && checks.accountType === 'chatgpt' &&
     checks.imageGeneration === true && checks.providerImageGeneration === true && !!checks.model;
+}
+
+function summarizeCapabilities(checks, completed) {
+  const limits = checks.rateLimits;
+  const permission = limits?.ordinaryUsageAllowed;
+  const codexBucket = limits?.rateLimitsByLimitId?.codex ??
+    (limits?.rateLimits?.limitId === 'codex' ? limits.rateLimits : null);
+  const codexLimitReason = codexBucket?.rateLimitReachedType ?? null;
+  return {
+    handshake: checks.handshake, accountType: checks.accountType ?? null,
+    imageGeneration: checks.imageGeneration ?? null, providerImageGeneration: checks.providerImageGeneration ?? null,
+    model: checks.model ?? null, quotaStatus: permission === true ? 'allowed' : permission === false ? 'blocked' : 'unknown',
+    codexLimitReason, codexSpendControlReached: codexBucket?.spendControlReached ?? null,
+    ready: completed && checks.ready && codexLimitReason === null, issues: checks.issues,
+  };
 }
 
 function newRecord(source) {
@@ -261,6 +277,8 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
 async function run(mode) {
   const loginCheck = mode.name === 'login-check';
   const existingLoginOnly = mode.name === 'check-existing-login';
+  const capabilityOnly = mode.name === 'check-image-capability';
+  const desktopQuery = existingLoginOnly || capabilityOnly;
   const firstImage = mode.name === 'login-first-image';
   const temporaryLogin = loginCheck || firstImage;
   if (temporaryLogin && (!process.stdin.isTTY || !process.stdout.isTTY)) {
@@ -268,7 +286,9 @@ async function run(mode) {
   }
   const outputParent = path.join(ROOT, 'output');
   await fs.mkdir(outputParent, { recursive: true });
-  const outputPrefix = existingLoginOnly ? 'codex-existing-login-' : 'codex-imagegen-';
+  const outputPrefix = {
+    'check-existing-login': 'codex-existing-login-', 'check-image-capability': 'codex-image-capability-',
+  }[mode.name] ?? 'codex-imagegen-';
   const outputDir = await fs.mkdtemp(path.join(outputParent, outputPrefix +
     new Date().toISOString().replace(/[:.]/g, '-') + '-'));
   const results = {
@@ -277,7 +297,7 @@ async function run(mode) {
     },
     preflight: { handshake: false, ready: false, issues: {} }, failureModes: {}, records: [],
   };
-  if (!temporaryLogin) results.existingLogin = {
+  if (!temporaryLogin && !capabilityOnly) results.existingLogin = {
     first: { started: false, handshake: false, accountType: null },
     reconnect: { started: false, handshake: false, accountType: null }, verified: false,
   };
@@ -290,8 +310,8 @@ async function run(mode) {
   process.on('SIGINT', cancel);
   process.on('SIGTERM', cancel);
   function listen(callback) { listener = callback; }
-  try {
-    if (!loginCheck && !existingLoginOnly) {
+  async function execute() {
+    if (!loginCheck && !desktopQuery) {
       try {
         datasetDir = await findDataset();
         dataset = await loadDataset(datasetDir);
@@ -320,7 +340,7 @@ async function run(mode) {
     const cliPath = await findDesktopCli();
     results.environment.codexSource = 'chatgpt-desktop-bundle';
     results.environment.codexExecutable = cliPath;
-    const isolate = existingLoginOnly ? isolateLoginCheck : isolateGeneration;
+    const isolate = desktopQuery ? isolateLoginCheck : isolateGeneration;
     const env = await isolate(tempRoot, baseEnv, cliPath);
     results.environment.codexVersion = execFileSync('codex', ['--version'], {
       cwd, env, encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'],
@@ -329,6 +349,13 @@ async function run(mode) {
       cwd, env, args: SERVER_ARGS, onNotification: (method, params) => listener?.(method, params),
     });
     cancellation.signal.throwIfAborted();
+    if (capabilityOnly) {
+      activeCheck = results.preflight;
+      client = startServer();
+      await preflight(client, activeCheck, results.failureModes);
+      cancellation.signal.throwIfAborted();
+      return;
+    }
     if (temporaryLogin) {
       results.loginCheck = { startupVerified: false, loginCompleted: false };
       client = startServer();
@@ -388,10 +415,13 @@ async function run(mode) {
       catch (error) { record.rateLimitErrors.after = error.message; }
       if (record.rateLimitsAfter?.ordinaryUsageAllowed === false) quotaBlocked = true;
     }
+  }
+  try {
+    await execute();
   } catch (error) {
-    if (existingLoginOnly && cancellation.signal.aborted) {
-      results.error = '已取消登录检查。';
-    } else if (existingLoginOnly && !activeCheck?.handshake && error.code === 'APP_SERVER_EXITED') {
+    if (desktopQuery && cancellation.signal.aborted) {
+      results.error = '已取消本次检查。';
+    } else if (desktopQuery && !activeCheck?.handshake && error.code === 'APP_SERVER_EXITED') {
       results.error = 'Codex 在查询账号前退出（' + error.message + '）。';
     } else if (!activeCheck?.handshake && error.code === 'APP_SERVER_EXITED') {
       results.preflight.issues.startup = error.message;
@@ -416,16 +446,36 @@ async function run(mode) {
       }
       process.off('SIGINT', cancel);
       process.off('SIGTERM', cancel);
-      if (existingLoginOnly) {
+      if (desktopQuery) {
         const { codexSource, codexVersion } = results.environment;
-        const report = { mode: mode.name, environment: { codexSource, codexVersion },
-          existingLogin: results.existingLogin, submitted: 0, error: results.error ?? null };
+        const report = { mode: mode.name, environment: { codexSource, codexVersion }, submitted: 0, error: results.error ?? null };
+        if (capabilityOnly) {
+          results.preflight = summarizeCapabilities(results.preflight, !results.error && !cancellation.signal.aborted);
+          report.preflight = results.preflight;
+        } else report.existingLogin = results.existingLogin;
         await fs.writeFile(path.join(outputDir, 'results.json'), JSON.stringify(report, null, 2) + '\n', { mode: 0o600 });
       } else await writeReport(outputDir, results);
     }
   }
   console.log('报告 ' + outputDir);
   if (results.error) console.error(results.error);
+  if (capabilityOnly) {
+    const checks = results.preflight;
+    if (checks.accountType !== 'chatgpt') {
+      console.log('出图能力未查询，已提交 0 张。');
+      return false;
+    }
+    const state = (value, yes, no) => value === null ? '未知' : value ? yes : no;
+    console.log('出图开关 ' + state(checks.imageGeneration, '开启', '关闭') +
+      '，服务 ' + state(checks.providerImageGeneration, '支持出图', '不支持出图') +
+      '，图片输入模型 ' + (checks.model ?? '未确认') +
+      '，普通额度 ' + { allowed: '可用', blocked: '受限', unknown: '未知' }[checks.quotaStatus] + '。');
+    if (checks.codexLimitReason) console.log('Codex 服务报告了额度限制（' + checks.codexLimitReason + '）。');
+    if (checks.codexSpendControlReached) console.log('Codex 服务报告已达到支出上限。');
+    for (const issue of Object.values(checks.issues)) console.error(issue);
+    console.log('出图预检' + (checks.ready ? '通过' : '未通过') + '，已提交 0 张。');
+    return checks.ready;
+  }
   if (existingLoginOnly) {
     const accountLabels = { chatgpt: 'ChatGPT 已登录', 'signed-out': '未登录', apiKey: 'API Key' };
     const status = check => check.started ? accountLabels[check.accountType] ?? '未确认' : '未进行';

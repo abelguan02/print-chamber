@@ -15,6 +15,10 @@ test('default is dry and ambiguous or out-of-range options fail before launching
     assert.throws(() => modeFrom(['--check-existing-login', other]));
   }
   assert.deepEqual(modeFrom(['--limit', '1']), { name: 'limit', count: 1 });
+  assert.deepEqual(modeFrom(['--check-image-capability']), { name: 'check-image-capability', count: 0 });
+  for (const extra of [['--all'], ['--limit', '1'], ['--dry-run'], ['--check-existing-login'], ['--login-check']]) {
+    assert.throws(() => modeFrom(['--check-image-capability', ...extra]));
+  }
   assert.deepEqual(modeFrom(['--login-check']), { name: 'login-check', count: 0 });
   assert.deepEqual(modeFrom(['--login-first-image']), { name: 'login-first-image', count: 1 });
   for (const args of [['--login-first-image', '--all'], ['--login-first-image', '--limit', '2'], ['--login-check', '--limit', '1'], ['--login-check', '--all'], ['--limit', '0'], ['--limit', '6'], ['--all', '--dry-run'], ['--limit']]) {
@@ -193,6 +197,82 @@ test('the default dry run stops before handshake when the generation launcher is
   assert.deepEqual(report.records, []);
 });
 
+async function runProbeFixture(t, {
+  accounts, flag, providerSupport = true, inputModalities = ['image'], ordinaryUsageAllowed = null,
+  rateLimits = {}, rateLimitsByLimitId = null,
+}) {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pc-session-reuse-')));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const dir = path.join(root, 'experiments', 'codex-imagegen');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.copyFile(path.join(__dirname, 'run.cjs'), path.join(dir, 'run.cjs'));
+  for (const file of ['image.cjs', 'client.cjs', 'login-check.cjs']) {
+    await fs.symlink(path.join(__dirname, file), path.join(dir, file));
+  }
+  const cli = path.join(root, 'codex');
+  const trace = path.join(root, 'methods');
+  await fs.writeFile(trace, '');
+  if (flag) {
+    await fs.writeFile(path.join(dir, 'report.cjs'), `
+      exports.loadDataset = async () => { require('node:fs').appendFileSync(${JSON.stringify(trace)}, '{"method":"dataset"}\\n'); };
+    `);
+  } else {
+    await fs.symlink(path.join(__dirname, 'report.cjs'), path.join(dir, 'report.cjs'));
+  }
+  await fs.writeFile(cli, '#!' + process.execPath + '\n' + `
+    const fs = require('node:fs');
+    const file = ${JSON.stringify(trace)};
+    const log = entry => fs.appendFileSync(file, JSON.stringify(entry) + '\\n');
+    const command = process.argv[2];
+    if (command === '--version') console.log('fixture CLI');
+    else if (command === 'app-server') {
+      const previous = fs.readFileSync(file, 'utf8').trim().split('\\n').filter(Boolean).map(JSON.parse);
+      const type = ${JSON.stringify(accounts)}[previous.filter(r => r.method === 'start').length];
+      const methods = {
+        initialize: {}, 'account/read': {account: type ? {type:type === 'cancel' ? 'chatgpt' : type, email:'unused@example.invalid'} : null},
+        'experimentalFeature/list': {data:[{name:'image_generation',enabled:true}]},
+        'modelProvider/capabilities/read': {imageGeneration:${JSON.stringify(providerSupport)}},
+        'model/list': {data:[{model:'fixture', inputModalities:${JSON.stringify(inputModalities)}}]},
+        'account/rateLimits/read': ${JSON.stringify({
+          ordinaryUsageAllowed, rateLimits, rateLimitsByLimitId, accountId: 'unused@example.invalid',
+        })},
+      };
+      log({method:'start', profile:process.env.CODEX_HOME, cwd:process.cwd(), args:process.argv.slice(2)});
+      process.on('exit', () => {
+        log({method:'end'});
+        if (type === 'cancel') process.kill(process.ppid, 'SIGTERM');
+      });
+      require('node:readline').createInterface({input:process.stdin}).on('line', line => {
+        const {id, method, params} = JSON.parse(line);
+        log({method});
+        if (method === 'initialized') return;
+        if (!Object.hasOwn(methods, method)) process.exit(8);
+        if (method === 'account/read' && (params.refreshToken !== false || Object.keys(params).length !== 1)) process.exit(9);
+        if (method === 'account/read' && type === 'disconnect') process.exit(3);
+        console.log(JSON.stringify({id, result:methods[method]}));
+      });
+    } else { log({method:command}); process.exit(7); }
+  `, { mode: 0o700 });
+  await fs.writeFile(path.join(dir, 'desktop-cli.cjs'), `exports.findDesktopCli = async () => ${JSON.stringify(cli)};`);
+  await fs.writeFile(path.join(dir, 'isolation.cjs'), `
+    exports.${flag ? 'isolateLoginCheck' : 'isolateGeneration'} = async (_root, env, cli) => {
+      if (cli !== ${JSON.stringify(cli)}) throw new Error('unexpected executable');
+      return env;
+    };
+  `);
+  const profile = path.join(root, 'existing-user');
+  const flags = flag ? [flag] : [];
+  const result = require('node:child_process').spawnSync(process.execPath, [path.join(dir, 'run.cjs'), ...flags], {
+    cwd: root, encoding: 'utf8', timeout: 8000,
+    env: { PATH: root, HOME: root, CODEX_HOME: profile, TMPDIR: root, PRINT_CHAMBER_G3_DIR: root },
+  });
+  const [reportDir] = await fs.readdir(path.join(root, 'output'));
+  const outputDir = path.join(root, 'output', reportDir);
+  const report = JSON.parse(await fs.readFile(path.join(outputDir, 'results.json')));
+  const entries = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
+  return { result, report, entries, profile, cli, outputDir };
+}
+
 test('daily sessions reconnect to the same profile and stop immediately if either connection lacks a login', async t => {
   const normalCases = [['chatgpt', 'chatgpt'], ['chatgpt', null], [null]];
   const testCases = [
@@ -200,72 +280,11 @@ test('daily sessions reconnect to the same profile and stop immediately if eithe
     ...[...normalCases, ['apiKey'], ['chatgpt', 'disconnect'], ['cancel']].map(accounts => ({ accounts, loginOnly: true })),
   ];
   for (const { accounts, loginOnly } of testCases) {
-    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pc-session-reuse-')));
-    t.after(() => fs.rm(root, { recursive: true, force: true }));
-    const dir = path.join(root, 'experiments', 'codex-imagegen');
-    await fs.mkdir(dir, { recursive: true });
-    await fs.copyFile(path.join(__dirname, 'run.cjs'), path.join(dir, 'run.cjs'));
-    for (const file of ['image.cjs', 'client.cjs', 'login-check.cjs']) {
-      await fs.symlink(path.join(__dirname, file), path.join(dir, file));
-    }
-    const cli = path.join(root, 'codex');
-    const trace = path.join(root, 'methods');
-    await fs.writeFile(trace, '');
-    if (loginOnly) {
-      await fs.writeFile(path.join(dir, 'report.cjs'), `
-        exports.loadDataset = async () => { require('node:fs').appendFileSync(${JSON.stringify(trace)}, '{"method":"dataset"}\\n'); };
-      `);
-    } else {
-      await fs.symlink(path.join(__dirname, 'report.cjs'), path.join(dir, 'report.cjs'));
-    }
-    await fs.writeFile(cli, '#!' + process.execPath + '\n' + `
-      const fs = require('node:fs');
-      const file = ${JSON.stringify(trace)};
-      const log = entry => fs.appendFileSync(file, JSON.stringify(entry) + '\\n');
-      const command = process.argv[2];
-      if (command === '--version') console.log('fixture CLI');
-      else if (command === 'app-server') {
-        const previous = fs.readFileSync(file, 'utf8').trim().split('\\n').filter(Boolean).map(JSON.parse);
-        const type = ${JSON.stringify(accounts)}[previous.filter(r => r.method === 'start').length];
-        const methods = {
-          initialize: {}, 'account/read': {account: type ? {type:type === 'cancel' ? 'chatgpt' : type, email:'unused@example.invalid'} : null},
-          'experimentalFeature/list': {data:[{name:'image_generation',enabled:true}]},
-          'modelProvider/capabilities/read': {imageGeneration:true},
-          'model/list': {data:[{model:'fixture', inputModalities:['image']}]}, 'account/rateLimits/read': {},
-        };
-        log({method:'start', profile:process.env.CODEX_HOME, cwd:process.cwd(), args:process.argv.slice(2)});
-        process.on('exit', () => {
-          log({method:'end'});
-          if (type === 'cancel') process.kill(process.ppid, 'SIGTERM');
-        });
-        require('node:readline').createInterface({input:process.stdin}).on('line', line => {
-          const {id, method, params} = JSON.parse(line);
-          log({method});
-          if (method === 'initialized') return;
-          if (!Object.hasOwn(methods, method)) process.exit(8);
-          if (method === 'account/read' && (params.refreshToken !== false || Object.keys(params).length !== 1)) process.exit(9);
-          if (method === 'account/read' && type === 'disconnect') process.exit(3);
-          console.log(JSON.stringify({id, result:methods[method]}));
-        });
-      } else process.exit(7);
-    `, { mode: 0o700 });
-    await fs.writeFile(path.join(dir, 'desktop-cli.cjs'), `exports.findDesktopCli = async () => ${JSON.stringify(cli)};`);
-    await fs.writeFile(path.join(dir, 'isolation.cjs'), `
-      exports.${loginOnly ? 'isolateLoginCheck' : 'isolateGeneration'} = async (_root, env, cli) => {
-        if (cli !== ${JSON.stringify(cli)}) throw new Error('unexpected executable');
-        return env;
-      };
-    `);
-    const profile = path.join(root, 'existing-user');
-    const flags = loginOnly ? ['--check-existing-login'] : [];
-    const result = require('node:child_process').spawnSync(process.execPath, [path.join(dir, 'run.cjs'), ...flags], {
-      cwd: root, encoding: 'utf8', timeout: 8000,
-      env: { PATH: root, HOME: root, CODEX_HOME: profile, TMPDIR: root, PRINT_CHAMBER_G3_DIR: root },
+    const { result, report, entries, profile, cli, outputDir } = await runProbeFixture(t, {
+      accounts, flag: loginOnly ? '--check-existing-login' : null,
     });
     const verified = accounts.length === 2 && accounts[1] === 'chatgpt';
     assert.equal(result.status, verified ? 0 : 1, result.stderr);
-    const [reportDir] = await fs.readdir(path.join(root, 'output'));
-    const report = JSON.parse(await fs.readFile(path.join(root, 'output', reportDir, 'results.json')));
     assert.equal(report.environment.codexSource, 'chatgpt-desktop-bundle');
     assert.equal(report.existingLogin.verified, verified);
     assert.equal(report.existingLogin.first.accountType, accounts[0] === 'cancel' ? 'chatgpt' : accounts[0] ?? 'signed-out');
@@ -277,14 +296,13 @@ test('daily sessions reconnect to the same profile and stop immediately if eithe
       assert.equal(report.submitted, 0);
       assert.equal(report.preflight, undefined);
       assert.equal(report.records, undefined);
-      assert.deepEqual(await fs.readdir(path.join(root, 'output', reportDir)), ['results.json']);
+      assert.deepEqual(await fs.readdir(outputDir), ['results.json']);
       if (accounts.length === 1) assert.match(result.stdout, /重连 未进行/);
     } else {
       assert.equal(report.environment.codexExecutable, cli);
       assert.equal(report.preflight.ready, verified);
       assert.deepEqual(report.records, []);
     }
-    const entries = (await fs.readFile(trace, 'utf8')).trim().split('\n').map(JSON.parse);
     const starts = entries.filter(e => e.method === 'start');
     assert.equal(starts.length, accounts.length);
     assert.equal(starts[0].profile, profile);
@@ -297,5 +315,54 @@ test('daily sessions reconnect to the same profile and stop immediately if eithe
     if (accounts.length === 2) expected.push('end');
     assert.deepEqual(methods, expected);
     assert.ok(!JSON.stringify(report).includes('unused@example.invalid'));
+  }
+});
+
+test('the image capability check inspects four conditions in one existing-login connection and submits nothing', async t => {
+  const reached = { limitId: 'codex', rateLimitReachedType: 'rate_limit_reached' };
+  const cases = [
+    { account: 'chatgpt', ordinaryUsageAllowed: true, ready: true, quotaStatus: 'allowed' },
+    { account: 'chatgpt', ordinaryUsageAllowed: null, ready: true, quotaStatus: 'unknown' },
+    { account: 'chatgpt', ordinaryUsageAllowed: false, ready: false, quotaStatus: 'blocked' },
+    { account: 'chatgpt', rateLimitsByLimitId: { codex: reached }, ready: false, quotaStatus: 'unknown',
+      codexLimitReason: 'rate_limit_reached' },
+    { account: 'chatgpt', rateLimits: reached, ready: false, quotaStatus: 'unknown',
+      codexLimitReason: 'rate_limit_reached' },
+    { account: 'chatgpt', rateLimitsByLimitId: { unrelated: { ...reached, limitId: 'unrelated' } },
+      ready: true, quotaStatus: 'unknown' },
+    { account: 'chatgpt', providerSupport: false, ready: false, quotaStatus: 'unknown' },
+    { account: 'chatgpt', inputModalities: ['text'], ready: false, quotaStatus: 'unknown' },
+    { account: null, ready: false, quotaStatus: 'unknown' },
+  ];
+  for (const scenario of cases) {
+    const { result, report, entries, profile, outputDir } = await runProbeFixture(t, {
+      accounts: [scenario.account], flag: '--check-image-capability', ...scenario,
+    });
+    assert.equal(result.status, scenario.ready ? 0 : 1, result.stderr);
+    assert.match(path.basename(outputDir), /^codex-image-capability-/);
+    assert.deepEqual(await fs.readdir(outputDir), ['results.json']);
+    assert.equal(report.mode, 'check-image-capability');
+    assert.equal(report.submitted, 0);
+    assert.equal(report.environment.codexSource, 'chatgpt-desktop-bundle');
+    assert.equal(report.preflight.handshake, true);
+    assert.equal(report.preflight.accountType, scenario.account ?? 'signed-out');
+    assert.equal(report.preflight.ready, scenario.ready);
+    assert.equal(report.preflight.quotaStatus, scenario.quotaStatus);
+    assert.equal(report.preflight.codexLimitReason ?? null, scenario.codexLimitReason ?? null);
+    assert.equal(entries[0].profile, profile);
+    assert.ok(!JSON.stringify(report).includes('unused@example.invalid'));
+
+    const methods = entries.map(entry => entry.method);
+    assert.deepEqual(methods.slice(0, 4), ['start', 'initialize', 'initialized', 'account/read']);
+    assert.equal(methods.at(-1), 'end');
+    const probes = scenario.account ? [
+      'experimentalFeature/list', 'modelProvider/capabilities/read', 'model/list', 'account/rateLimits/read',
+    ] : [];
+    assert.deepEqual(methods.slice(4, -1).sort(), probes.sort());
+    if (scenario.account) {
+      assert.equal(report.preflight.imageGeneration, true);
+      assert.equal(report.preflight.providerImageGeneration, scenario.providerSupport ?? true);
+      assert.equal(report.preflight.model, scenario.inputModalities ? null : 'fixture');
+    }
   }
 });

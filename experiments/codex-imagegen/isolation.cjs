@@ -64,7 +64,7 @@ function isolateGeneration(tempRoot, baseEnv, cli, verify = verifyOfficialCodex)
 }
 
 function isolateLoginCheck(tempRoot, baseEnv, cli, verify = verifyOfficialCodex) {
-  // The account-only client lets the signed service maintain its normal state.
+  // Login and capability queries let the signed service maintain its normal state.
   return createLauncher(tempRoot, baseEnv, cli, verify, '');
 }
 
