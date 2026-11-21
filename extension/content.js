@@ -139,6 +139,18 @@
         if(result.fromHistory)$('.caption').title=[result.provider||'local',result.model].filter(Boolean).join(' · ');
         panel.dataset.totalMs = String(Math.round(performance.now() - enteredAt));
         markPrinted(img.element);
+        if (result.recordId && !result.fromHistory && Number.isFinite(result.receivedAt)) {
+          // DONE follows image decode and the reveal animation. Allow a frame to paint it.
+          requestAnimationFrame(()=>requestAnimationFrame(async ()=>{
+            if (ticket !== version || document.hidden) return;
+            const elapsedMs = Date.now() - result.receivedAt;
+            if (elapsedMs < 0) return;
+            try {
+              const saved = await chrome.runtime.sendMessage({type:'codex-displayed',recordId:result.recordId,elapsedMs});
+              if (saved?.error && ticket===version) $('.caption').title=saved.error;
+            } catch { if (ticket===version) $('.caption').title='显示耗时保存失败'; }
+          }));
+        }
       };
       if(result.fromHistory){finish();return;}
       state('revealing','逐层打印中…');

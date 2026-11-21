@@ -222,8 +222,9 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
   const imageCalls = new Map();
   const texts = new Map();
   const completion = new Promise(resolve => { finished = resolve; });
-  const start = performance.now();
-  record.startedAt = new Date().toISOString();
+  let start;
+  const imageStarts = new Map();
+  let receivedAt;
   function observeImage(item, complete, summary = false) {
     if (item?.type !== 'imageGeneration') return;
     const prior = imageCalls.get(item.id);
@@ -257,9 +258,13 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
     turnId = id;
     if (record.firstEventMs === null) record.firstEventMs = Math.round(performance.now() - start);
     const item = params.item;
+    if (directImage && method === 'item/started' && item?.type === 'imageGeneration' && !imageStarts.has(item.id)) {
+      imageStarts.set(item.id, performance.now());
+    }
     if (method === 'item/started' || method === 'item/completed') observeImage(item, method === 'item/completed');
     if (directImage && method === 'item/completed' && item?.type === 'imageGeneration') {
       terminalTime = performance.now();
+      receivedAt = Date.now();
       acceptingEvents = false;
       finished();
       return;
@@ -271,6 +276,7 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
     }
     if (method === 'turn/completed') {
       terminalTime = performance.now();
+      receivedAt = Date.now();
       record.endedAt = new Date().toISOString();
       record.turnStatus = params.turn.status;
       const { items, itemsView = 'full' } = params.turn;
@@ -291,6 +297,8 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
       timer = setTimeout(() => { expired = true; reject(new Error('单张超过 5 分钟')); }, timeoutMs);
     });
     record.attempted = true;
+    record.startedAt = new Date().toISOString();
+    start = performance.now();
     const submit = client.request('turn/start', {
       threadId, input: [
         { type: 'text', text: (directImage ? 'Use image_gen.imagegen with referenced_image_paths=' + JSON.stringify([inputPath]) + '. Follow this exact G3 prompt:' : INSTRUCTION) + '\n\n' + prompt },
@@ -313,6 +321,15 @@ async function runTurn({ client, listen, record, source, prompt, model, tempRoot
     }
     if (!record.outputImage) throw new Error(record.error || '已观测到图片工具调用，但未收到有效输出');
     if (record.referenceHashMatched === false) throw new Error(`已取得图片，但图片工具记录的输入与第 ${source.id} 张原画不符。`);
+    if (directImage) {
+      const drawing = imageStarts.get(completedImage.id);
+      record.receivedAt = receivedAt;
+      record.timings = {
+        submitToDrawMs: drawing === undefined ? null : Math.round(drawing - start),
+        drawToReceiveMs: drawing === undefined ? null : Math.round(terminalTime - drawing),
+        receiveToDisplayMs: null,
+      };
+    }
     record.status = 'success';
   } finally {
     clearTimeout(timer);

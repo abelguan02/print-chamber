@@ -71,7 +71,7 @@ async function operate(request, signal) {
       model,tempRoot:temp,cwd:temp,outputDir:temp,inputPath,singleAttempt:true,directImage:true});
     await client.close();
     const image = await preparePrint(temp, record);
-    return {image, seconds:record.durationMs/1000, provider:'codex', model};
+    return {image, seconds:record.durationMs/1000, provider:'codex', model, timings:record.timings, receivedAt:record.receivedAt};
   } catch (error) {
     if (error.code === 'APP_SERVER_REQUEST_TIMEOUT' && error.method === 'thread/start') {
       throw Error(`Codex 创建会话超过 ${error.timeoutMs / 1000} 秒，已停止，原画未提交。`);

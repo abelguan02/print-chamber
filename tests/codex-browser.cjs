@@ -40,7 +40,8 @@ test('Codex one-click login, failures, explicit printing and history', {skip:pro
         if(request.type==='connect')return {connected:true};
         if(request.confirmed!==true||!request.data.startsWith('data:image/'))throw Error('Invalid print');
         const image=await preparePrint(${JSON.stringify(dir)},{outputImage:'artwork.png',width:256,height:384});
-        return {image,model:'test',provider:'codex',seconds:1};
+        return {image,model:'test',provider:'codex',seconds:5.75,receivedAt:Date.now()-1200,
+          timings:{submitToDrawMs:1250,drawToReceiveMs:4500,receiveToDisplayMs:null}};
        }).finally(()=>process.stdin.destroy());`,{mode:0o700});
     ctx=await chromium.launchPersistentContext(dir,{headless:true,executablePath,args:['--disable-extensions-except='+ext,'--load-extension='+ext]});
     const worker=ctx.serviceWorkers()[0]||await ctx.waitForEvent('serviceworker');
@@ -69,7 +70,7 @@ test('Codex one-click login, failures, explicit printing and history', {skip:pro
     const source='https://www.artstation.com/artwork/pc-test';
     await ctx.route(source,r=>r.fulfill({contentType:'text/html',body:'<body style="padding:80px"><img id="art" width="240" height="360" src="https://cdna.artstation.com/pc-test.png"></body>'}));
     await ctx.route('https://cdna.artstation.com/pc-test.png',r=>r.fulfill({contentType:'image/png',path:fixture}));
-    const page=await ctx.newPage();await page.goto(source);await page.locator('#art').hover();
+    const page=await ctx.newPage();await page.emulateMedia({reducedMotion:'no-preference'});await page.goto(source);await page.locator('#art').hover();
     const overlay=page.locator('print-chamber-overlay');await overlay.locator('.panel.waiting').waitFor();await overlay.hover();
     assert.deepEqual((await fs.readFile(calls,'utf8')).trim().split('\n'),Array(4).fill('connect'));
     await overlay.locator('.retry').click();await overlay.locator('.panel.ready').waitFor();
@@ -77,7 +78,19 @@ test('Codex one-click login, failures, explicit printing and history', {skip:pro
     assert.equal(history.length,1);assert.equal(history[0].provider,'codex');
     assert.ok(history[0].image.startsWith('data:image/jpeg;base64,'));
     assert.deepEqual(await overlay.locator('.result').evaluate(img=>[img.naturalWidth,img.naturalHeight]),[256,384]);
+    await popup.waitForFunction(async()=>Number.isFinite((await chrome.storage.local.get('history')).history[0].timings.receiveToDisplayMs));
+    const timing=await worker.evaluate(async()=>(await chrome.storage.local.get('history')).history[0].timings);
+    assert.equal(timing.submitToDrawMs,1250);assert.equal(timing.drawToReceiveMs,4500);
+    assert.ok(timing.receiveToDisplayMs>=1800,'includes native postprocessing and the reveal before DONE');
+    await popup.reload();
+    const [gallery]=await Promise.all([ctx.waitForEvent('page'),popup.locator('#recent a').first().click()]);
+    await gallery.waitForURL(origin+'gallery.html#'+history[0].id);
+    const values=gallery.locator('#detail .print-timings dd');
+    await values.first().waitFor();
+    assert.deepEqual(await values.allTextContents(),['1.25 秒','4.50 秒',(timing.receiveToDisplayMs/1000).toFixed(2)+' 秒']);
+    await gallery.close();
     await page.reload();await page.locator('#art').hover();await overlay.locator('.panel.ready').waitFor();
+    assert.deepEqual(await worker.evaluate(async()=>(await chrome.storage.local.get('history')).history[0].timings),timing);
     assert.equal((await fs.readFile(calls,'utf8')).trim().split('\n').filter(x=>x==='generate').length,1);
   }finally{if(ctx)await ctx.close();await fs.rm(dir,{recursive:true,force:true});}
 });

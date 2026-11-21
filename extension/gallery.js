@@ -36,7 +36,24 @@ $('#batch-download').onclick=async()=>{
 };
 const hero=$('#hero-printer');hero.innerHTML=PRINT_CHAMBER_HTML;
 const style=document.createElement('style');style.textContent=PRINT_CHAMBER_CSS.replace(/:host[^}]+}/g,'');document.head.append(style);
-function detail(record){$('#detail img').src=record.image;$('#detail-download').href=record.image;$('#detail').showModal()}
+const timingList=document.createElement('dl');
+timingList.className='print-timings';
+timingList.setAttribute('aria-label','Codex 分段耗时');
+$('#detail-download').before(timingList);
+function showTimings(timings){
+ timingList.replaceChildren();
+ timingList.hidden=!timings;
+ if(!timings)return;
+ for(const [label,ms] of [['提交 → 开始画',timings.submitToDrawMs],['开始画 → 收到图',timings.drawToReceiveMs],['收到图 → 显示',timings.receiveToDisplayMs]]){
+   const term=document.createElement('dt'),value=document.createElement('dd');
+   term.textContent=label;value.textContent=Number.isFinite(ms)?(ms/1000).toFixed(2)+' 秒':'未记录';
+   timingList.append(term,value);
+ }
+}
+function detail(record){
+ $('#detail img').src=record.image;$('#detail-download').href=record.image;
+ $('#detail').dataset.recordId=record.id;showTimings(record.timings);$('#detail').showModal();
+}
 $('#dismiss').onclick=()=>$('#detail').close();$('#detail').onclick=e=>{if(e.target===$('#detail'))$('#detail').close()};
 function render(){
  const visibleIds=new Set(visibleRecords().map(r=>r.id));for(const id of selected)if(!visibleIds.has(id))selected.delete(id);
@@ -77,4 +94,7 @@ chrome.storage.local.get(['history','token','generationMode','cloudVerified']).t
  let label='OFFLINE',color='#FF5A48';if(v.generationMode==='codex'){label='CODEX';color='#F4B53A'}else if(v.generationMode==='cloud'){label=v.cloudVerified?'CLOUD':'UNVERIFIED';color=v.cloudVerified?'#7BE07B':'#F4B53A'}else{try{const r=await fetch('http://127.0.0.1:8877/health',{headers:v.token?{Authorization:'Bearer '+v.token}:{},signal:AbortSignal.timeout(2000)});const h=await r.json();if(r.ok&&v.token&&!h.failed){label=h.ready?(h.busy?'PRINTING':'READY'):'LOADING';color=h.ready&&!h.busy?'#7BE07B':'#F4B53A'}}catch{}}
  $('#health').lastElementChild.textContent=label;$('#health').lastElementChild.style.color=color;$('#health').firstElementChild.style.background=color;$('#health').firstElementChild.style.boxShadow='0 0 8px 2px '+color+'88';
 });
-chrome.storage.onChanged.addListener(c=>{if(c.history){records=c.history.newValue||[];if($('#detail').open)$('#detail').close();render()}});
+chrome.storage.onChanged.addListener(c=>{if(c.history){records=c.history.newValue||[];if($('#detail').open){
+ const openRecord=records.find(r=>r.id===$('#detail').dataset.recordId);
+ if(openRecord)showTimings(openRecord.timings);else $('#detail').close();
+}render()}});

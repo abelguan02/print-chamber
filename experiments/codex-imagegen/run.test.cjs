@@ -142,7 +142,30 @@ test('direct Codex printing accepts the first tool completion without another mo
   },5000,true);
   await promise;
   assert.equal(record.status,'success');
+  assert.deepEqual(record.timings,{submitToDrawMs:null,drawToReceiveMs:null,receiveToDisplayMs:null});
+  assert.ok(Number.isFinite(record.receivedAt));
   assert.deepEqual(calls,['thread/start','turn/start']);
+});
+
+test('Codex timing follows the matching image start and completion even before the submit reply', {skip:process.platform!=='darwin'}, async t=>{
+  let now=100;
+  t.mock.method(performance,'now',()=>now);
+  const {record,promise}=await turnFixture(t,(_method,_params,notify)=>{
+    const started={id:'image-1',type:'imageGeneration',status:'in_progress'};
+    now=200;
+    notify('item/started',{threadId:'T',turnId:'U',item:{type:'reasoning'}});
+    notify('item/started',{threadId:'other',turnId:'U',item:started});
+    now=1350;
+    notify('item/started',{threadId:'T',turnId:'U',item:started});
+    now=2000;
+    notify('item/started',{threadId:'T',turnId:'U',item:started});
+    now=5850;
+    notify('item/completed',{threadId:'T',turnId:'U',item:{...started,status:'completed',result:tinyPng}});
+    now=6800;
+    return {turn:{id:'U'}};
+  },10000,true);
+  await promise;
+  assert.deepEqual(record.timings,{submitToDrawMs:1250,drawToReceiveMs:4500,receiveToDisplayMs:null});
 });
 
 test('a generated image with a different input hash fails the source check', {
