@@ -39,6 +39,10 @@ node experiments/codex-imagegen/run.cjs --first-image-once
 
 同机当前的 Codex 桌面聊天直接查询动态清单，返回 `image_gen__imagegen`，对应绑定的类型为 `function`。该项只验证桌面聊天自身的工具注册。
 
+随后使用官方配置项 `features.tool_registry.turn_metadata_includes_tool_info=true`，让 Codex 在发给模型的每轮请求中附上工具信息。离线对照沿用上述空白配置和固定文字回复，本机模拟服务读取请求中的 `tool_namespaces_info`。开关 `code_mode` 的两组都列出相同的 3 个命名空间、21 个函数。唯一与图片有关的函数是查看图片的 `functions.view_image`，清单中没有 `image_gen.imagegen`。两组的供应商出图预检均为真。[官方配置定义](https://developers.openai.com/codex/config-schema.json)
+
+同版本的真实连接也识别到已有 ChatGPT 登录。单独观察从握手到创建会话的通知，期间没有启动警告。保持首图的权限和模型，启用上述工具信息选项后，发送 1 条纯文字查询。该轮正常结束，模型回复 `CATALOG_UNAVAILABLE`，客户端只收到用户消息及助手文字。该选项把清单附给模型服务，当前版本的公开会话接口没有向 Print Chamber 返回同一份清单。因此，真实连接能否调用出图工具仍未确认。这次查询与离线对照均提交 0 张图片。真实查询回执和离线清单分别保存在 `output/codex-live-catalog-metadata-sLrBpu/results.json` 和同目录的 `comparison.json`。
+
 ### 零提交预检
 
 使用已通过登录复用实测的桌面端连接，在工作树根目录运行：
