@@ -23,19 +23,34 @@ python3 configure-local.py --python "$PWD/.venv/bin/python" --model "/你的模�
 可用 `FLUX_PYTHON`、`FLUX_MODEL_PATH` 覆盖路径，但 Finder 启动的 App 通常不继承终端变量，
 因此日常使用优先保存本机配置。样图默认读取 `~/Downloads`，可用 `FLUX_SAMPLES_DIR` 覆盖。
 
-菜单栏仍需 macOS 的命令行开发工具：
+在装有命令行开发工具的 Mac 上构建开发版菜单栏小助手：
 
 ```sh
 python3 menu-helper/build.py
 open "Print Chamber 小助手.app"
 ```
 
-App 当前引用项目位置。移动项目后重新构建；它尚不是自包含的分发安装包。
+开发版引用项目位置；移动仓库后重新构建。
 小助手版本号在构建时读取 `extension/manifest.json`，与扩展保持一致。
 统一图标的源文件是 `extension/icons/icon.svg`（16/32 px 使用简化版 `icon-small.svg`）。修改后运行 `npm run build:icons`，
 重新生成扩展 PNG 与 `menu-helper/AppIcon.icns`，再运行 `menu-helper/build.py` 打包进小助手。
 关于窗口的自愿赞助收款码为可选文件：放入 `menu-helper/sponsor/wechat.png`、`alipay.png`（也接受 `.jpg`），
 下次打开关于窗口即显示，无需重新构建；缺失时显示“收款码暂未添加”。
+
+## 自包含的菜单栏 App（阶段 A）
+
+在 Apple Silicon Mac 上复用同一构建脚本，生成可搬移的 App。首次构建需要联网下载固定的官方 Node.js v22.23.3，后续构建复用已校验的缓存。
+
+```sh
+python3 -B menu-helper/build.py --release
+python3 -B menu-helper/test_bundle.py -v
+```
+
+产物为 `dist/Print Chamber.app`，支持 Apple Silicon、macOS 13 及以上。发布版与开发版使用不同的应用标识，分别从包内资源和开发仓库加载。构建时按官方清单和固定 SHA-256 校验 Node，再仅对外层 App 做 ad-hoc 签名。包内 Node 保留官方签名；使用者可直接启动菜单，无需安装命令行开发工具、Python 或系统 Node。
+
+发布版在 `~/Library/Application Support/Print Chamber/` 保存数据，每次启动将包内扩展同步到其中的 `extension/`。默认 Python 为数据目录的 `python/bin/python`，模型为 `models/FLUX.2-klein-4B`。两种模式都支持 `PRINT_CHAMBER_STATE`；Python 和模型路径依次从环境变量、当前数据目录的 `runtime.json`、模式默认值选取。缺少本地运行环境时，菜单显示「本地模型未安装」，「设置…」打开阶段 A 的空窗口。
+
+构建后的测试把 App 复制到仓库外，以临时数据目录运行 `--self-test`，复用真实菜单与控制器入口，不显示窗口。实机检查可将 App 拖到其他目录再打开，点击菜单栏打印机图标，检查状态行、「设置…」与「打开使用说明」。
 
 ## 开发依赖与测试
 
@@ -95,7 +110,7 @@ Python 契约测试使用真实 HTTP handler、临时端口及合成图片，只
 - 本地请求体读取总时限为 15 秒；读完并计算哈希后才尝试获取模型锁，慢上传不占用模型。
   缓存读写和推理仍受同一把锁保护；上传超时不释放其他请求持有的锁。
 - 服务启动时将状态目录设为 0700，新连接码直接以 0600 权限创建；已有连接码保留并收紧权限。
-  小助手复制连接码遵循其进程的 `PRINT_CHAMBER_STATE`，支持绝对路径及 `~`；不设置时使用项目 `.local`。
+  小助手复制连接码遵循其进程的 `PRINT_CHAMBER_STATE`，支持绝对路径及 `~`；不设置时开发版使用项目 `.local`，发布版使用上述数据目录。
   自定义目录时，小助手与服务须使用同一环境值，建议绝对路径；Finder 通常不继承终端环境。
 - 缺少云端供应商时提示先选择并保存；本地服务返回非 JSON 时提示响应格式异常，不显示原始解析错误。
 - 新服务日志不输出连接码；加载/推理失败记录错误类别和异常类型。

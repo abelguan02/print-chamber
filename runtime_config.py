@@ -4,14 +4,16 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-STATE = Path(os.environ.get('PRINT_CHAMBER_STATE', ROOT / '.local')).expanduser().resolve()
+APP_MODE = os.environ.get('PRINT_CHAMBER_MODE') == 'app'
+DEFAULT_STATE = Path.home() / 'Library/Application Support/Print Chamber' if APP_MODE else ROOT / '.local'
+STATE = Path(os.environ.get('PRINT_CHAMBER_STATE', DEFAULT_STATE)).expanduser().resolve()
 
 
 def settings():
     config_file = STATE / 'runtime.json'
     config = json.loads(config_file.read_text()) if config_file.exists() else {}
-    defaults = {'python': ROOT / '.venv/bin/python',
-                'model': Path.home() / 'Models/FLUX.2-klein-4B',
+    defaults = {'python': STATE / 'python/bin/python' if APP_MODE else ROOT / '.venv/bin/python',
+                'model': (STATE / 'models' if APP_MODE else Path.home() / 'Models') / 'FLUX.2-klein-4B',
                 'samples': Path.home() / 'Downloads'}
     variables = {'python': 'FLUX_PYTHON', 'model': 'FLUX_MODEL_PATH', 'samples': 'FLUX_SAMPLES_DIR'}
     # Keep the venv executable path: resolving its symlink would bypass the venv.

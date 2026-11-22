@@ -15,7 +15,8 @@ class MenuHelperPathTests(unittest.TestCase):
         cls.addClassCleanup(cls.temp.cleanup)
         cls.folder = Path(cls.temp.name)
         source = (ROOT / 'menu-helper/main.swift').read_text().split('\nlet app = NSApplication.shared', 1)[0]
-        source += '\nlet path = connectionTokenURL(project: URL(fileURLWithPath: CommandLine.arguments[1]))\n'
+        source += '\nlet path = stateDirectory(project: URL(fileURLWithPath: CommandLine.arguments[1]),\n'
+        source += '    appMode: false, environment: ProcessInfo.processInfo.environment).appendingPathComponent("token")\n'
         source += 'print(try String(contentsOf: path, encoding: .utf8))\n'
         main = cls.folder / 'main.swift'
         main.write_text(source)
