@@ -1,10 +1,104 @@
 import Cocoa
 
-func connectionTokenURL(project: URL, environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
-    let state = environment["PRINT_CHAMBER_STATE"].map {
+func stateDirectory(project: URL, appMode: Bool, environment: [String: String]) -> URL {
+    let fallback = appMode ? FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Application Support/Print Chamber") : project.appendingPathComponent(".local")
+    let directory = environment["PRINT_CHAMBER_STATE"].map {
         URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath)
-    } ?? project.appendingPathComponent(".local")
-    return state.standardizedFileURL.resolvingSymlinksInPath().appendingPathComponent("token")
+    } ?? fallback
+    return directory.standardizedFileURL.resolvingSymlinksInPath()
+}
+
+struct RuntimePaths {
+    let appMode: Bool
+    let root: URL
+    let state: URL
+    let controller: URL
+    let help: URL
+    let environment = ProcessInfo.processInfo.environment
+
+    init(bundle: Bundle = .main) {
+        appMode = bundle.object(forInfoDictionaryKey: "PrintChamberMode") as? String == "app"
+        if appMode {
+            root = bundle.resourceURL!
+        } else {
+            root = URL(fileURLWithPath: bundle.object(forInfoDictionaryKey: "ProjectRoot") as! String)
+        }
+        state = stateDirectory(project: root, appMode: appMode, environment: environment)
+        controller = root.appendingPathComponent(appMode ? "controller.py" : "menu-helper/controller.py")
+        help = root.appendingPathComponent(appMode ? "使用说明.txt" : "菜单栏小助手说明.txt")
+    }
+
+    var childEnvironment: [String: String] {
+        var env = environment
+        env["PRINT_CHAMBER_MODE"] = appMode ? "app" : "dev"
+        env["PRINT_CHAMBER_STATE"] = state.path
+        if appMode { env["PYTHONDONTWRITEBYTECODE"] = "1" }
+        return env
+    }
+
+    func controllerInterpreter() throws -> URL? {
+        struct Config: Decodable { var python: String?; var model: String? }
+        let fm = FileManager.default
+        let file = state.appendingPathComponent("runtime.json")
+        let config = fm.fileExists(atPath: file.path)
+            ? try JSONDecoder().decode(Config.self, from: Data(contentsOf: file)) : Config()
+        func setting(_ key: String, _ saved: String?, _ fallback: URL) -> URL {
+            guard let path = [environment[key], saved].compactMap({ $0 }).first(where: { !$0.isEmpty })
+            else { return fallback }
+            return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        }
+        let python = setting("FLUX_PYTHON", config.python, appMode
+            ? state.appendingPathComponent("python/bin/python") : root.appendingPathComponent(".venv/bin/python"))
+        var directory: ObjCBool = false
+        guard fm.fileExists(atPath: python.path, isDirectory: &directory), !directory.boolValue,
+              fm.isExecutableFile(atPath: python.path) else { return nil }
+        if appMode {
+            // On a clean Mac this executable opens the command-line tools installer.
+            guard python.resolvingSymlinksInPath().path != "/usr/bin/python3" else { return nil }
+            let model = setting("FLUX_MODEL_PATH", config.model, state.appendingPathComponent("models/FLUX.2-klein-4B"))
+            guard fm.fileExists(atPath: model.path, isDirectory: &directory), directory.boolValue else { return nil }
+        }
+        return python  // Preserve the venv executable path, including its symlink.
+    }
+
+    func prepare() throws {
+        guard appMode else { return }
+        let fm = FileManager.default
+        try fm.createDirectory(at: state, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: state.path)
+        try syncExtension(from: root.appendingPathComponent("extension"), to: state.appendingPathComponent("extension"))
+    }
+}
+
+// Only this application-owned subtree is mirrored. Replace links themselves, never their targets.
+func syncExtension(from source: URL, to destination: URL) throws {
+    let fm = FileManager.default
+    func type(_ url: URL) throws -> FileAttributeType? {
+        do { return try fm.attributesOfItem(atPath: url.path)[.type] as? FileAttributeType }
+        catch let error as NSError where error.domain == NSCocoaErrorDomain &&
+            error.code == NSFileReadNoSuchFileError { return nil }
+    }
+    let existing = try type(destination)
+    switch try type(source) {
+    case .typeDirectory:
+        let names = try fm.contentsOfDirectory(atPath: source.path)
+        if existing != .typeDirectory {
+            if existing != nil { try fm.removeItem(at: destination) }
+            try fm.createDirectory(at: destination, withIntermediateDirectories: false)
+        }
+        for name in names {
+            try syncExtension(from: source.appendingPathComponent(name), to: destination.appendingPathComponent(name))
+        }
+        for name in Set(try fm.contentsOfDirectory(atPath: destination.path)).subtracting(names) {
+            try fm.removeItem(at: destination.appendingPathComponent(name))
+        }
+    case .typeRegular:
+        if existing == .typeRegular && fm.contentsEqual(atPath: source.path, andPath: destination.path) { return }
+        if existing != nil && existing != .typeRegular { try fm.removeItem(at: destination) }
+        try Data(contentsOf: source).write(to: destination, options: .atomic)
+    default: throw CocoaError(.fileReadUnsupportedScheme)
+    }
 }
 
 let repositoryURL = URL(string: "https://github.com/abelguan02/print-chamber")!
@@ -36,7 +130,13 @@ final class Helper: NSObject, NSApplicationDelegate {
     var state = "unknown"
     var flashUntil = Date.distantPast
     var aboutWindow: AboutWindow?
-    let root = URL(fileURLWithPath: Bundle.main.object(forInfoDictionaryKey: "ProjectRoot") as! String)
+    let paths = RuntimePaths()
+    var root: URL { paths.root }
+    var interpreter: URL?
+    var missingLabel = "本地模型未安装"
+    var settingsWindow: NSWindow?
+    var copyItem: NSMenuItem!
+    var controllerStarts = 0
     let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -44,12 +144,30 @@ final class Helper: NSObject, NSApplicationDelegate {
             renderAbout(to: URL(fileURLWithPath: CommandLine.arguments[index + 1])); NSApp.terminate(nil); return
         }
         // Launch Services normally reuses the app; also guard direct binary launches.
-        if NSRunningApplication.runningApplications(withBundleIdentifier: "local.printchamber.helper")
+        if let identifier = Bundle.main.bundleIdentifier,
+           NSRunningApplication.runningApplications(withBundleIdentifier: identifier)
             .contains(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }) {
             NSApp.terminate(nil); return
         }
+        do { try prepareRuntime() }
+        catch { alert("初始化失败 · " + error.localizedDescription); NSApp.terminate(nil); return }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         setIcon("printer", "Print Chamber")
+        statusItem.menu = makeMenu()
+        refresh()
+        if interpreter != nil {
+            timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() }
+            RunLoop.main.add(timer!, forMode: .common)
+        }
+    }
+
+    func prepareRuntime() throws {
+        try paths.prepare()
+        do { interpreter = try paths.controllerInterpreter() }
+        catch { interpreter = nil; missingLabel = "运行配置无效" }
+    }
+
+    func makeMenu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
         let title = NSMenuItem(title: "Print Chamber · 本地模型", action: nil, keyEquivalent: "")
@@ -60,19 +178,20 @@ final class Helper: NSObject, NSApplicationDelegate {
         stopItem = item("停止模型", #selector(stopModel), menu)
         restartItem = item("重启模型", #selector(restartModel), menu)
         startItem.isEnabled = false; stopItem.isEnabled = false; restartItem.isEnabled = false
-        let hint = NSMenuItem(title: "仅手动启动 · 不随登录加载模型", action: nil, keyEquivalent: "")
-        hint.isEnabled = false; menu.addItem(hint)
+        if !paths.appMode {
+            let hint = NSMenuItem(title: "仅手动启动 · 不随登录加载模型", action: nil, keyEquivalent: "")
+            hint.isEnabled = false; menu.addItem(hint)
+        }
         menu.addItem(.separator())
-        item("复制插件连接码", #selector(copyToken), menu)
+        copyItem = item("复制插件连接码", #selector(copyToken), menu)
+        for entry in [startItem, stopItem, restartItem, copyItem] { entry?.isHidden = interpreter == nil }
+        if paths.appMode { item("设置…", #selector(showSettings), menu) }
         item("打开使用说明", #selector(openHelp), menu)
         item("查看运行日志", #selector(openLog), menu)
         menu.addItem(.separator())
         item("关于 Print Chamber…", #selector(showAbout), menu)
         item("退出小助手…", #selector(quit), menu)
-        statusItem.menu = menu
-        refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() }
-        RunLoop.main.add(timer!, forMode: .common)
+        return menu
     }
 
     @discardableResult func item(_ title: String, _ selector: Selector, _ menu: NSMenu) -> NSMenuItem {
@@ -81,8 +200,8 @@ final class Helper: NSObject, NSApplicationDelegate {
     }
 
     func setIcon(_ symbol: String, _ description: String) {
-        statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
-        statusItem.button?.image?.isTemplate = true
+        statusItem?.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: description)
+        statusItem?.button?.image?.isTemplate = true
     }
 
     // Briefly confirm a silent action in the menu bar itself, since the menu closes on click.
@@ -94,6 +213,12 @@ final class Helper: NSObject, NSApplicationDelegate {
 
     func refresh() { run("status") }
     func run(_ action: String, then: ((String) -> Void)? = nil) {
+        guard let python = interpreter else {
+            stateItem.title = missingLabel
+            state = "uninstalled"
+            then?(state)
+            return
+        }
         guard !pending else {
             // A user action waits for the in-flight status check instead of being dropped.
             if action != "status" { DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { self.run(action, then: then) } }
@@ -106,13 +231,15 @@ final class Helper: NSObject, NSApplicationDelegate {
         if let progress = ["start": "正在启动…", "stop": "正在停止…", "restart": "正在重启…"][action] {
             stateItem.title = progress; flashUntil = .distantPast
         }
-        let project = root
+        let paths = self.paths
+        controllerStarts += 1
         DispatchQueue.global(qos: .utility).async {
             let process = Process(), pipe = Pipe()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-            process.arguments = [project.appendingPathComponent("menu-helper/controller.py").path, action]
+            process.executableURL = python
+            process.environment = paths.childEnvironment
+            process.arguments = [paths.controller.path, action]
             process.standardOutput = pipe
-            let logURL = project.appendingPathComponent(".local/helper.log")
+            let logURL = paths.state.appendingPathComponent("helper.log")
             try? FileManager.default.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                      attributes: [.posixPermissions: 0o700])
             if !FileManager.default.fileExists(atPath: logURL.path) {
@@ -143,17 +270,13 @@ final class Helper: NSObject, NSApplicationDelegate {
                 if self.startItem.isEnabled != canStart { self.startItem.isEnabled = canStart }
                 if self.stopItem.isEnabled != canStop { self.stopItem.isEnabled = canStop }
                 if self.restartItem.isEnabled != canStop { self.restartItem.isEnabled = canStop }
-                self.statusItem.button?.toolTip = "Print Chamber · " + label
+                self.statusItem?.button?.toolTip = "Print Chamber · " + label
                 if Date() >= self.flashUntil {
                     self.stateItem.title = label
                     self.setIcon(state == "ready" ? "printer.fill" : (state == "busy" ? "hourglass" : "printer"), label)
                 }
                 if let message = response["message"] as? String { self.alert(message) }
                 if action != "status" && ["error", "conflict"].contains(state) { self.alert(label) }
-                if CommandLine.arguments.contains("--self-test") {
-                    print("Menu ready: \(self.statusItem.menu!.items.count) items; \(label)")
-                    NSApp.terminate(nil)
-                }
                 then?(state)
             }
         }
@@ -168,16 +291,28 @@ final class Helper: NSObject, NSApplicationDelegate {
     @objc func stopModel() { run("stop") }
     @objc func restartModel() { run("restart") }
     @objc func copyToken() {
-        guard let token = try? String(contentsOf: connectionTokenURL(project: root), encoding: .utf8)
+        guard let token = try? String(contentsOf: paths.state.appendingPathComponent("token"), encoding: .utf8)
             .trimmingCharacters(in: .whitespacesAndNewlines), !token.isEmpty else {
             alert("首次使用请先启动模型，连接码会自动生成。"); return
         }
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(token, forType: .string)
         flash("已复制插件连接码", symbol: "checkmark.circle")
     }
-    @objc func openHelp() { NSWorkspace.shared.open(root.appendingPathComponent("菜单栏小助手说明.txt")) }
+    @objc func showSettings() {
+        if settingsWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 220),
+                                  styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "设置"
+            window.isReleasedWhenClosed = false
+            window.center()
+            settingsWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+    @objc func openHelp() { NSWorkspace.shared.open(paths.help) }
     @objc func openLog() {
-        let path = root.appendingPathComponent(controllerFailed ? ".local/helper.log" : ".local/service.log")
+        let path = paths.state.appendingPathComponent(controllerFailed ? "helper.log" : "service.log")
         if FileManager.default.fileExists(atPath: path.path) { NSWorkspace.shared.open(path) }
         else { alert("暂无运行日志，请先启动模型。") }
     }
@@ -309,6 +444,26 @@ final class Helper: NSObject, NSApplicationDelegate {
         row.orientation = .horizontal; row.spacing = 24; row.alignment = .top
         return row
     }
+}
+
+// Exercise the packaged startup paths and menu without installing a status-bar item.
+if CommandLine.arguments.contains("--self-test") {
+    do {
+        let helper = Helper()
+        try helper.prepareRuntime()
+        let menu = helper.makeMenu()
+        helper.refresh()
+        while helper.pending { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+        let report: [String: Any] = [
+            "mode": helper.paths.appMode ? "app" : "dev", "resources": helper.root.path,
+            "state": helper.paths.state.path, "controller": helper.paths.controller.path,
+            "python": helper.interpreter?.path as Any, "help": helper.paths.help.path,
+            "menu": menu.items.filter { !$0.isHidden && !$0.isSeparatorItem }.map { $0.title },
+            "controllerStarts": helper.controllerStarts
+        ]
+        print(String(decoding: try JSONSerialization.data(withJSONObject: report), as: UTF8.self))
+        exit(0)
+    } catch { fputs("Startup self-test failed: \(error)\n", stderr); exit(1) }
 }
 
 let app = NSApplication.shared

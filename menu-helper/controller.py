@@ -9,7 +9,8 @@ import sys
 import time
 import urllib.request
 
-ROOT = Path(__file__).resolve().parent.parent
+SCRIPT_DIR = Path(__file__).resolve().parent
+ROOT = SCRIPT_DIR if os.environ.get('PRINT_CHAMBER_MODE') == 'app' else SCRIPT_DIR.parent
 sys.path.insert(0, str(ROOT))
 from runtime_config import STATE, settings
 PYTHON = settings()['python']
