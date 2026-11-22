@@ -18,4 +18,4 @@
 | 01 设置页去除说明小字 | `01-settings-no-helper-text.md` | 已完成（PR #5） |
 | 02 Codex 出图可行性验证 | `02-codex-imagegen-feasibility.md` | 已完成（1/5 张实测） |
 | 03 修正本机 Codex 接入（PR #6） | `03-codex-integration-fixes.md` | 已完成（PR #6） |
-| 04 GitHub 安装包与自动配对 | 待 03 合并后编写 | 未开始 |
+| 04 GitHub 安装包与自动配对（4 个阶段） | `04-installer.md` | 待开发 |
