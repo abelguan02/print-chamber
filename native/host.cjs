@@ -1,9 +1,12 @@
 'use strict';
 const {once} = require('node:events');
 const {operate} = require('./operation.cjs');
+const {pair} = require('./pairing.cjs');
+const {origin} = require('./identity.cjs');
 
 // Each port carries one request. Chrome's stdout limit is 1 MiB per frame.
-async function serve(input,output,run=operate) {
+async function serve(input,output,run=(message, signal) =>
+  ['hello', 'local-token'].includes(message.type) ? pair(message) : operate(message, signal)) {
   const abort = new AbortController();
   let header=Buffer.alloc(4), headerSize=0, body, size=0, dispatched=false;
   const cancel=()=>abort.abort();
@@ -55,8 +58,7 @@ async function serve(input,output,run=operate) {
   });
 }
 if(require.main===module){
-  const [expected,origin]=process.argv.slice(2);
-  if(!/^chrome-extension:\/\/[a-p]{32}\/$/.test(expected)||expected!==origin)process.exitCode=1;
+  if(process.argv.length!==3 || process.argv[2]!==origin)process.exitCode=1;
   else serve(process.stdin,process.stdout).finally(()=>process.stdin.destroy());
 }
 module.exports={serve};

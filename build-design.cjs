@@ -43,7 +43,7 @@ const {chromium}=require('playwright');
   daily.querySelector('a').href='gallery.html';daily.querySelector('a').target='_blank';
   return first.outerHTML+daily.outerHTML;
  });
- fs.writeFileSync('extension/popup.html',`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Print Chamber</title><link rel="stylesheet" href="pages.css"><body class="popup">${popup}<p id="status" role="status" hidden></p><div id="help-text" hidden>点击右上角打印机图标 → 启动模型，等待就绪，再点“复制插件连接码”并粘贴到这里。无需打开终端。</div><script src="popup.js"></script></body></html>\n`);
+ fs.writeFileSync('extension/popup.html',`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Print Chamber</title><link rel="stylesheet" href="pages.css"><body class="popup">${popup}<p id="status" role="status" hidden></p><div id="help-text" hidden>点击右上角打印机图标 → 启动模型，等待就绪，再点“复制插件连接码”并粘贴到这里。无需打开终端。</div><button id="update-extension" hidden>更新扩展</button><script src="pairing.js"></script><script src="popup.js"></script></body></html>\n`);
  const gallery=await parse('gallery',doc=>{
   const layout=doc.querySelector('x-dc>div');layout.id='gallery';
   layout.style.minHeight='100vh';

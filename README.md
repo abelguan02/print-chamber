@@ -22,10 +22,10 @@
 
 ## Mac 上连接本机 Codex
 
-需要 macOS、Chrome、Node.js 22 或更新版本，以及已用 ChatGPT 账号登录的官方 Codex 独立版或桌面版。
+使用 Chrome，并先用 ChatGPT 账号登录本机官方 Codex 独立版或桌面版。
 
-1. 在项目目录运行 `node native/install.cjs`，为 Chrome 登记本机助手。
-2. 在 `chrome://extensions` 加载安装器显示的目录。已从同一目录加载的扩展点「重新加载」并刷新作品页。
+1. 打开自包含的 `Print Chamber.app`。首次打开会显示「设置」，App 会登记随包的本机助手。开发版可在仓库使用 Node.js 22+ 运行 `node native/install.cjs` 登记。
+2. 在 App 设置中点「在访达中显示」，再点「打开扩展页」。开启开发者模式，选择「加载已解压的扩展程序」，选中刚才显示的 `extension` 文件夹。开发版选择安装器显示的目录。
 3. 在「生成设置」选择「本机 Codex」，点「连接 Codex」，首次确认额度使用。出现「已连接」后可到作品页打印。
 
 ## 当前验证范围

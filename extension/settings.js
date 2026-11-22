@@ -180,7 +180,7 @@ $('#trial').onclick = () => action(async () => {
 });
 
 Promise.all([send({type: 'cloud-load'}), chrome.storage.local.get(['generationMode', 'token']),
-  chrome.runtime.sendMessage({type:'codex-detect'})])
+  chrome.runtime.sendMessage({type:'codex-detect'}), Pairing.ready])
   .then(([config, local, detection]) => {
     if (detection?.found) $('#mode').add(new Option('本机 Codex', 'codex'));
     const firstUse = !local.generationMode && !local.token && !Object.values(config.configs).some(c => c.hasKey);

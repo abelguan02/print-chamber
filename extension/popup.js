@@ -4,8 +4,9 @@ let codexMode=false,cloudMode=false,cloudVerified=false;
 const settingsLink=document.createElement('a');settingsLink.href='settings.html';settingsLink.target='_blank';settingsLink.textContent='生成设置';settingsLink.style.cssText='display:block;text-align:center;margin:12px;font-size:12px;color:#766B5A';document.body.append(settingsLink);
 const aboutLink=document.createElement('a');aboutLink.href='about.html';aboutLink.target='_blank';aboutLink.textContent='关于 Print Chamber';aboutLink.style.cssText='display:block;text-align:center;margin:12px;font-size:11px;color:#766B5A';document.body.append(aboutLink);
 const setup=$('#setup'),dashboard=$('#dashboard'),status=$('#status');
-// Keep the existing panel shell; all configuration now lives in settings.html.
+// Keep the manual pairing field available when the native helper is absent.
 $('#token').parentElement.hidden=true;$('#help').parentElement.hidden=true;
+Pairing.ready.then(available=>{$('#token').parentElement.hidden=available;});
 $('#setup-lcd').textContent='SETUP';$('#save').textContent='打开生成设置';
 function note(text=''){status.textContent=text;status.hidden=!text}
 function setView(connected){setup.hidden=connected;dashboard.hidden=!connected;settingsLink.hidden=!connected}
@@ -49,6 +50,24 @@ async function check(token,today=0){
 }
 function openSettings(){chrome.runtime.openOptionsPage().catch(()=>note('无法打开生成设置，请重新打开插件'));}
 $('#save').onclick=openSettings;
+const localCheck=document.createElement('button');
+localCheck.textContent='测试本地连接';
+setup.append(localCheck);
+localCheck.onclick=async()=>{
+ localCheck.disabled=true;
+ try {
+  let token;
+  if(await Pairing.ready)token=await Pairing.localToken();
+  else {
+   $('#token').parentElement.hidden=false;
+   token=$('#token').value.trim();
+   if(!token){$('#token').focus();return;}
+   if(token.length>1024||/[\r\n]/.test(token))throw Error('连接码格式无效');
+  }
+  if(await check(token))await chrome.storage.local.set({token,generationMode:'local'});
+ }catch(error){note(error.message);}
+ finally{localCheck.disabled=false;}
+};
 $('#connection-led').title='打开生成设置';$('#connection-led').role='button';$('#connection-led').tabIndex=0;
 $('#connection-led').onclick=openSettings;$('#connection-led').onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openSettings()}};
 async function activate(force){

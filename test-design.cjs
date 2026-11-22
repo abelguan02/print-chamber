@@ -90,7 +90,7 @@ const fs=require('fs');const assert=require('node:assert/strict');
  await page.setViewportSize({width:390,height:700});await page.locator('#art').hover();await host.waitFor({state:'visible'});await host.locator('.panel.ready').waitFor();const narrow=await host.boundingBox();assert(narrow.x>=0&&narrow.x+narrow.width<=390&&narrow.y+narrow.height<=700);assert.match(await host.locator('.caption').innerText(),/历史打印/);await page.screenshot({path:'output/new-narrow.png'});
  // Saved prints remain viewable with invalid credentials.
  await page.keyboard.press('Escape');await page.mouse.move(0,0);
- const popup=await context.newPage();popup.on('pageerror',e=>errors.push(e.message));await worker.evaluate(()=>chrome.storage.local.set({token:''}));await page.bringToFront();await popup.goto(`chrome-extension://${id}/popup.html`);await popup.setViewportSize({width:360,height:650});await popup.locator('#setup').waitFor();await popup.screenshot({path:'output/new-setup.png'});assert.equal(await popup.locator('#token').isVisible(),false);
+ const popup=await context.newPage();popup.on('pageerror',e=>errors.push(e.message));await worker.evaluate(()=>chrome.storage.local.set({token:''}));await page.bringToFront();await popup.goto(`chrome-extension://${id}/popup.html`);await popup.setViewportSize({width:360,height:650});await popup.locator('#setup').waitFor();await popup.screenshot({path:'output/new-setup.png'});await popup.locator('#token').waitFor();
  const [settings]=await Promise.all([context.waitForEvent('page'),popup.locator('#save').click()]);
  await settings.waitForURL(`chrome-extension://${id}/settings.html`);
  await settings.waitForFunction(()=>!document.querySelector('#fields').disabled);

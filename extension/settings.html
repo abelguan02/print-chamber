@@ -1,12 +1,12 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>生成设置 · Print Chamber</title><link rel="icon" href="icons/icon-32.png"><link rel="stylesheet" href="settings.css"></head>
-<body><main><header><span>PRINT CHAMBER</span><h1>生成设置</h1></header>
+<body><main><header><span>PRINT CHAMBER</span><h1>生成设置</h1></header><button type="button" id="update-extension" hidden>更新扩展</button>
 <form id="settings"><fieldset id="fields" disabled>
 <label for="mode">生成方式</label><select id="mode"><option value="cloud">云端 API</option><option value="local">本地模型 · Apple Silicon</option></select>
 <section id="codex-fields" hidden><button id="codex-connect" type="button">连接 Codex</button></section>
 <section id="local-note" hidden>
-<label for="local-token">本地连接码</label><input id="local-token" type="password" autocomplete="off" spellcheck="false" maxlength="1024" placeholder="粘贴菜单栏小助手中的连接码">
-<p id="local-key-state" hidden></p>
+<div id="manual-pairing"><label for="local-token">本地连接码</label><input id="local-token" type="password" autocomplete="off" spellcheck="false" maxlength="1024" placeholder="粘贴菜单栏小助手中的连接码">
+<p id="local-key-state" hidden></p></div>
 <button id="local-check" type="button">测试连接</button>
 <p id="local-status" role="status" aria-live="polite"></p>
 </section>
@@ -28,4 +28,4 @@
 <section id="trial-section" class="trial" hidden><h2>效果预览</h2><label for="file">参考原画</label><input id="file" type="file" accept="image/png,image/jpeg,image/webp"><button id="trial" type="button">试生成</button><img id="preview" alt="试生成结果" hidden><a id="download" hidden download="print-chamber-trial.jpg">下载试生成结果</a></section>
 </fieldset></form>
 <p><a href="about.html" style="color:inherit">关于 Print Chamber</a></p>
-</main><script src="cloud.js"></script><script src="local-settings.js"></script><script src="settings.js"></script></body></html>
+</main><script src="cloud.js"></script><script src="pairing.js"></script><script src="local-settings.js"></script><script src="settings.js"></script></body></html>

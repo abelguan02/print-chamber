@@ -37,7 +37,7 @@ open "Print Chamber 小助手.app"
 关于窗口的自愿赞助收款码为可选文件：放入 `menu-helper/sponsor/wechat.png`、`alipay.png`（也接受 `.jpg`），
 下次打开关于窗口即显示，无需重新构建；缺失时显示“收款码暂未添加”。
 
-## 自包含的菜单栏 App（阶段 A）
+## 自包含的菜单栏 App
 
 在 Apple Silicon Mac 上复用同一构建脚本，生成可搬移的 App。首次构建需要联网下载固定的官方 Node.js v22.23.3，后续构建复用已校验的缓存。
 
@@ -48,9 +48,13 @@ python3 -B menu-helper/test_bundle.py -v
 
 产物为 `dist/Print Chamber.app`，支持 Apple Silicon、macOS 13 及以上。发布版与开发版使用不同的应用标识，分别从包内资源和开发仓库加载。构建时按官方清单和固定 SHA-256 校验 Node，再仅对外层 App 做 ad-hoc 签名。包内 Node 保留官方签名；使用者可直接启动菜单，无需安装命令行开发工具、Python 或系统 Node。
 
-发布版在 `~/Library/Application Support/Print Chamber/` 保存数据，每次启动将包内扩展同步到其中的 `extension/`。默认 Python 为数据目录的 `python/bin/python`，模型为 `models/FLUX.2-klein-4B`。两种模式都支持 `PRINT_CHAMBER_STATE`；Python 和模型路径依次从环境变量、当前数据目录的 `runtime.json`、模式默认值选取。缺少本地运行环境时，菜单显示「本地模型未安装」，「设置…」打开阶段 A 的空窗口。
+发布版在 `~/Library/Application Support/Print Chamber/` 保存数据，每次启动将包内扩展同步到其中的 `extension/`。默认 Python 为数据目录的 `python/bin/python`，模型为 `models/FLUX.2-klein-4B`。两种模式都支持 `PRINT_CHAMBER_STATE`；Python 和模型路径依次从环境变量、当前数据目录的 `runtime.json`、模式默认值选取。缺少本地运行环境时，菜单显示「本地模型未安装」，「设置…」显示 Chrome 扩展、本地模型及本机 Codex 状态。首次启动会打开设置，随后可从菜单再次打开。
 
 构建后的测试把 App 复制到仓库外，以临时数据目录运行 `--self-test`，复用真实菜单与控制器入口，不显示窗口。实机检查可将 App 拖到其他目录再打开，点击菜单栏打印机图标，检查状态行、「设置…」与「打开使用说明」。
+
+启动发布版会登记固定 ID 的 Chrome 本机助手，并在搬移后更新路径。扩展在后台启动及打开设置时报告所加载的版本；「更新扩展」会重新加载已同步的副本。选择本地模型后点「测试连接」即可自动配对。开发模式可用 `node native/install.cjs` 登记同一主机名；登记以最近一次为准。
+
+构建后运行 `node --test tests/pairing-browser.cjs` 检查从搬移、登记到 Chrome 配对的完整路径，使用独立的临时 HOME、无窗口 Chromium 和模拟的本地健康检查。原生配对协议测试包含在 `npm test`。
 
 ## 开发依赖与测试
 

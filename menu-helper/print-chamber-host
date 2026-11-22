@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+resources="$(dirname "$0")/../Resources"
+export PRINT_CHAMBER_MODE=app
+exec "$resources/node/bin/node" "$resources/native/host.cjs" "$@"

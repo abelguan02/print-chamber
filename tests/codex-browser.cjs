@@ -4,7 +4,7 @@ const fs=require('node:fs/promises');
 const os=require('node:os');
 const path=require('node:path');
 const {chromium}=require('playwright');
-const {extensionId}=require('../native/install.cjs');
+const {id}=require('../native/identity.cjs');
 const {executablePath,fixture}=require('./browser-options.cjs');
 
 test('Codex one-click login, failures, explicit printing and history', {skip:process.platform!=='darwin'},async()=>{
@@ -25,16 +25,19 @@ test('Codex one-click login, failures, explicit printing and history', {skip:pro
     const code=await fs.readFile(bridge,'utf8');
     assert.ok(code.includes("'com.printchamber.codex'"));
     await fs.writeFile(bridge,code.replace("'com.printchamber.codex'",JSON.stringify(name)));
-    const id=extensionId(ext);
+
     const origin='chrome-extension://'+id+'/';
     await fs.mkdir(registry);
     await fs.writeFile(path.join(registry,name+'.json'),JSON.stringify({name,description:'test fixture',path:host,type:'stdio',allowed_origins:[origin]}));
+    await fs.writeFile(statusFile,'ok');
     await fs.writeFile(host,'#!'+process.execPath+'\n'+
       `const fs=require('node:fs');const {serve}=require(${JSON.stringify(require.resolve('../native/host.cjs'))});
        const {preparePrint}=require(${JSON.stringify(require.resolve('../native/operation.cjs'))});
        serve(process.stdin,process.stdout,async request=>{
         fs.appendFileSync(${JSON.stringify(calls)},request.type+'\\n');
         const mode=fs.readFileSync(${JSON.stringify(statusFile)},'utf8');
+        if(request.type==='hello')return {appVersion:'0.3.0',extensionVersion:'0.3.0'};
+        if(request.type==='local-token')return {token:null};
         if(request.type==='detect')return mode==='absent'?{found:false,source:null,version:null}:{found:true,source:'standalone',version:'codex-cli 0.0.1'};
         if(mode==='exit')process.exit(0);
         if(mode==='signed-out')throw Error('未登录 Codex');
@@ -43,7 +46,7 @@ test('Codex one-click login, failures, explicit printing and history', {skip:pro
         const image=await preparePrint(${JSON.stringify(dir)},{outputImage:'artwork.png',width:256,height:384});
         return {image,model:'test',provider:'codex',seconds:5.75};
        }).finally(()=>process.stdin.destroy());`,{mode:0o700});
-    ctx=await chromium.launchPersistentContext(dir,{headless:true,executablePath,args:['--disable-extensions-except='+ext,'--load-extension='+ext]});
+    ctx=await chromium.launchPersistentContext(dir,{headless:true,executablePath,env:{...process.env, HOME:dir},args:['--disable-extensions-except='+ext,'--load-extension='+ext]});
     const worker=ctx.serviceWorkers()[0]||await ctx.waitForEvent('serviceworker');
     assert.equal(new URL(worker.url()).host,id);
     await worker.evaluate(image=>{
