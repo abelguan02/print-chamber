@@ -178,10 +178,10 @@ async function pairingStatus() {
     return {available:true, update:(difference.find(n => n !== 0) || 0) > 0};
   } catch { return {available:false, update:false}; }
 }
-async function pairLocal() {
+async function pairLocal(checkOnly) {
   const {token} = await codexRequest({type:'local-token'});
   if (!token) return {paired:false};
-  await chrome.storage.local.set({token});
+  if (!checkOnly) await chrome.storage.local.set({token});
   return {paired:true};
 }
 // Each worker startup announces the version Chrome actually loaded.
@@ -196,7 +196,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (['pairing-status','pairing-local'].includes(message.type)) {
     const trusted = ['settings.html','popup.html'].some(page => sender.url === chrome.runtime.getURL(page));
     if (sender.id !== chrome.runtime.id || !trusted) { reply({error:'仅扩展配置页面可配对'}); return; }
-    const operation = message.type === 'pairing-status' ? hello() : pairLocal();
+    const operation = message.type === 'pairing-status' ? hello() : pairLocal(message.checkOnly === true);
     operation.then(reply).catch(() => reply({error:'无法取得本地连接码'}));
     return true;
   }

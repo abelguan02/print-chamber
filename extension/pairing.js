@@ -9,14 +9,24 @@ const Pairing = (() => {
     }
     return !!result?.available;
   });
-  async function localToken(required=true) {
-    const result = await chrome.runtime.sendMessage({type:'pairing-local'});
-    if (!result || result.error) throw Error(result?.error || '本机助手未响应');
-    if (!result.paired) {
-      if (required) throw Error('尚无连接码 · 请先启动本地模型');
-      return null;
+  function bindManualEntry(field) {
+    async function lookup(checkOnly) {
+      if (await ready) {
+        const result = await chrome.runtime.sendMessage({type:'pairing-local', checkOnly});
+        field.hidden = result?.paired === true;
+        if (!result || result.error) throw Error(result?.error || '本机助手未响应');
+        return field.hidden;
+      }
+      field.hidden = false;
+      return false;
     }
-    return (await chrome.storage.local.get('token')).token;
+    // Inspect on open without replacing an existing manual code or triggering a health check.
+    const inspected = lookup(true).catch(() => { field.hidden = false; });
+    return async function localToken() {
+      await inspected;
+      if (!await lookup(false)) return null;
+      return (await chrome.storage.local.get('token')).token;
+    };
   }
-  return {ready, localToken};
+  return {ready, bindManualEntry};
 })();

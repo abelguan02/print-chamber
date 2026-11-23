@@ -4,18 +4,18 @@ globalThis.LocalSettings = (() => {
  const input=document.querySelector('#local-token');
  const status=document.querySelector('#local-status');
  let storedToken='';
- const paired=Pairing.ready.then(available=>{document.querySelector('#manual-pairing').hidden=available;return available;});
+ const localToken=Pairing.bindManualEntry(document.querySelector('#manual-pairing'));
  function reset(){status.textContent=input.value.trim()||storedToken?'尚未检查':'未配置';}
  function describe(){const keyState=document.querySelector('#local-key-state');keyState.textContent=storedToken?'已保存连接码':'';keyState.hidden=!storedToken;input.placeholder=storedToken?'输入新连接码可替换':'粘贴小助手中的连接码';}
  const loaded=chrome.storage.local.get('token').then(({token})=>{storedToken=typeof token==='string'?token:'';describe();reset();});
  input.addEventListener('input',reset);
  chrome.storage.onChanged.addListener((changes,area)=>{if(area==='local'&&changes.token){storedToken=changes.token.newValue||'';describe();reset();}});
  function candidate(){const token=input.value.trim()||storedToken;if(token.length>1024||/[\r\n]/.test(token))throw Error('连接码格式无效');return token;}
- async function save(){await loaded;if(await paired)return !!(await Pairing.localToken(false));const token=candidate();if(token)await chrome.storage.local.set({token});storedToken=token;input.value='';describe();reset();return !!token;}
+ async function save(){await loaded;if(await localToken())return true;const token=candidate();if(token)await chrome.storage.local.set({token});storedToken=token;input.value='';describe();reset();return !!token;}
  async function check(){
   await loaded;
   let token;
-  try {token=await paired?await Pairing.localToken():candidate();}
+  try {token=await localToken() || candidate();}
   catch(error){status.textContent=error.message;return;}
   if(!token){reset();return;}
   status.textContent='检查中…';

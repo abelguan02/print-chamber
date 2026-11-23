@@ -71,14 +71,15 @@ test('moved app pairs with its synchronized extension, refreshes local credentia
   const popup=await ctx.newPage();
   await popup.goto(origin+'popup.html');
   await popup.locator('#update-extension').waitFor();
-  assert.equal(await popup.locator('#token').isVisible(),false);
+  await popup.locator('#token').waitFor();
   const settings=await ctx.newPage();
   await settings.goto(origin+'settings.html');
   await settings.locator('#update-extension').waitFor();
   await settings.selectOption('#mode','local');
-  assert.equal(await settings.locator('#local-token').isVisible(),false);
+  await settings.locator('#local-token').waitFor();
   await settings.click('#local-check');
-  await settings.waitForFunction(()=>document.querySelector('#local-status').textContent.includes('请先启动'));
+  await settings.waitForFunction(()=>!document.querySelector('#fields').disabled);
+  assert.equal(await settings.locator('#local-status').innerText(),'未配置');
   let expected='fixture-popup';
   await ctx.route('http://127.0.0.1:8877/health',route=>{
     assert.equal(route.request().headers().authorization,'Bearer '+expected);
@@ -92,6 +93,7 @@ test('moved app pairs with its synchronized extension, refreshes local credentia
   await fs.writeFile(path.join(state,'token'),expected);
   await settings.click('#local-check');
   await settings.waitForFunction(()=>document.querySelector('#local-status').textContent==='已就绪');
+  assert.equal(await settings.locator('#local-token').isVisible(),false);
   assert.equal((await worker.evaluate(()=>chrome.storage.local.get('token'))).token,'fixture-rotated');
   assert.equal(launch(moved).extensionStatus,'已连接 · v0.0.1');
   await settings.click('#update-extension');
@@ -104,4 +106,56 @@ test('moved app pairs with its synchronized extension, refreshes local credentia
   assert.equal(await fresh.evaluate(()=>chrome.runtime.getManifest().version),version);
   assert.equal(await fresh.locator('#update-extension').isVisible(),false);
   assert.ok(launch(moved).settingsRows[0].includes('已连接 · v'+version));
+});
+
+test('manual pairing works in settings and popup when an available helper has no local token',async t=>{
+  const home=await fs.mkdtemp(path.join(os.tmpdir(),'pc-manual-pairing-'));
+  const extension=path.resolve(__dirname,'../extension');
+  let ctx;
+  t.after(async()=>{await ctx?.close();await fs.rm(home,{recursive:true,force:true});});
+  ctx=await chromium.launchPersistentContext(path.join(home,'profile'),{headless:true,executablePath,
+    env:{...process.env,HOME:home},args:['--disable-extensions-except='+extension,'--load-extension='+extension]});
+  const worker=ctx.serviceWorkers()[0]||await ctx.waitForEvent('serviceworker');
+  await worker.evaluate(()=>{
+    globalThis.fixtureCode='fixture-automatic';
+    globalThis.codexRequest=async request=>{
+      if(request.type==='hello')return {appVersion:'0.3.0',extensionVersion:'0.3.0'};
+      if(request.type==='local-token')return {token:globalThis.fixtureCode};
+      if(request.type==='detect')return {found:false};
+      throw Error('Unexpected native request');
+    };
+  });
+  const checked=[];
+  await ctx.route('http://127.0.0.1:8877/health',route=>{
+    checked.push(route.request().headers().authorization);
+    return route.fulfill({contentType:'application/json',body:'{"ready":true,"failed":false,"busy":false}'});
+  });
+  const settings=await ctx.newPage();
+  await settings.goto(origin+'settings.html');
+  await settings.selectOption('#mode','local');
+  await settings.locator('#manual-pairing').waitFor({state:'hidden'});
+  const popup=await ctx.newPage();
+  await popup.goto(origin+'popup.html');
+  await popup.locator('#setup').waitFor();
+  await popup.locator('#token').waitFor({state:'hidden'});
+  assert.deepEqual(await worker.evaluate(()=>chrome.storage.local.get('token')),{});
+
+  await worker.evaluate(()=>{globalThis.fixtureCode=null;});
+  await settings.click('#local-check');
+  await settings.locator('#local-token').fill('fixture-settings');
+  await settings.click('#local-check');
+  await settings.waitForFunction(()=>document.querySelector('#local-status').textContent==='已就绪');
+  assert.equal(await settings.locator('#local-token').isVisible(),true);
+  assert.deepEqual(checked,['Bearer fixture-settings']);
+
+  const checkPopup=popup.getByRole('button',{name:'测试本地连接'});
+  await checkPopup.click();
+  await popup.locator('#token').fill('fixture-popup-manual');
+  await checkPopup.click();
+  await popup.waitForFunction(()=>document.querySelector('#dashboard-lcd').textContent==='READY');
+  assert.equal(checked.at(-1),'Bearer fixture-popup-manual');
+  await popup.close();
+  await settings.click('#save-settings');
+  await settings.waitForFunction(()=>document.querySelector('#notice').textContent==='已保存');
+  assert.equal((await worker.evaluate(()=>chrome.storage.local.get('token'))).token,'fixture-settings');
 });

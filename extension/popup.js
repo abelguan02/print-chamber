@@ -4,9 +4,8 @@ let codexMode=false,cloudMode=false,cloudVerified=false;
 const settingsLink=document.createElement('a');settingsLink.href='settings.html';settingsLink.target='_blank';settingsLink.textContent='生成设置';settingsLink.style.cssText='display:block;text-align:center;margin:12px;font-size:12px;color:#766B5A';document.body.append(settingsLink);
 const aboutLink=document.createElement('a');aboutLink.href='about.html';aboutLink.target='_blank';aboutLink.textContent='关于 Print Chamber';aboutLink.style.cssText='display:block;text-align:center;margin:12px;font-size:11px;color:#766B5A';document.body.append(aboutLink);
 const setup=$('#setup'),dashboard=$('#dashboard'),status=$('#status');
-// Keep the manual pairing field available when the native helper is absent.
-$('#token').parentElement.hidden=true;$('#help').parentElement.hidden=true;
-Pairing.ready.then(available=>{$('#token').parentElement.hidden=available;});
+$('#help').parentElement.hidden=true;
+const localToken=Pairing.bindManualEntry($('#token').parentElement);
 $('#setup-lcd').textContent='SETUP';$('#save').textContent='打开生成设置';
 function note(text=''){status.textContent=text;status.hidden=!text}
 function setView(connected){setup.hidden=connected;dashboard.hidden=!connected;settingsLink.hidden=!connected}
@@ -56,10 +55,8 @@ setup.append(localCheck);
 localCheck.onclick=async()=>{
  localCheck.disabled=true;
  try {
-  let token;
-  if(await Pairing.ready)token=await Pairing.localToken();
-  else {
-   $('#token').parentElement.hidden=false;
+  let token=await localToken();
+  if(!token){
    token=$('#token').value.trim();
    if(!token){$('#token').focus();return;}
    if(token.length>1024||/[\r\n]/.test(token))throw Error('连接码格式无效');
