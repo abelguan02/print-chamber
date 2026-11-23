@@ -46,7 +46,7 @@ python3 -B menu-helper/build.py --release
 python3 -B menu-helper/test_bundle.py -v
 ```
 
-产物为 `dist/Print Chamber.app`，支持 Apple Silicon、macOS 13 及以上。发布版与开发版使用不同的应用标识，分别从包内资源和开发仓库加载。构建时按官方清单和固定 SHA-256 校验 Node，再仅对外层 App 做 ad-hoc 签名。包内 Node 保留官方签名；使用者可直接启动菜单，无需安装命令行开发工具、Python 或系统 Node。
+产物为 `dist/Print Chamber.app`，支持 Apple Silicon、macOS 14 及以上。发布版与开发版使用不同的应用标识，分别从包内资源和开发仓库加载。构建时按官方清单和固定 SHA-256 校验 Node，再仅对外层 App 做 ad-hoc 签名。包内 Node 保留官方签名；使用者可直接启动菜单，无需安装命令行开发工具、Python 或系统 Node。
 
 发布版在 `~/Library/Application Support/Print Chamber/` 保存数据，每次启动将包内扩展同步到其中的 `extension/`。默认 Python 为数据目录的 `python/bin/python`，模型为 `models/FLUX.2-klein-4B`。两种模式都支持 `PRINT_CHAMBER_STATE`；Python 和模型路径依次从环境变量、当前数据目录的 `runtime.json`、模式默认值选取。缺少本地运行环境时，菜单显示「本地模型未安装」，「设置…」显示 Chrome 扩展、本地模型及本机 Codex 状态。首次启动会打开设置，随后可从菜单再次打开。
 
@@ -58,15 +58,15 @@ python3 -B menu-helper/test_bundle.py -v
 
 ## 制作安装包
 
-在 Apple Silicon Mac 的仓库根目录运行 `npm run release`。版本读取自 `extension/manifest.json`，更新时同步 npm 的版本和锁文件。脚本重新构建发布版 App、校验缓存中的 Node，并输出 `dist/PrintChamber-<版本>-arm64.dmg` 和 `dist/SHA256SUMS`。在 `dist/` 中运行 `shasum -a 256 -c SHA256SUMS` 可核对安装包。
+在 Apple Silicon Mac 的仓库根目录运行 `npm run release`。版本读取自 `extension/manifest.json`，更新时同步 npm 的版本和锁文件。打包涉及的目录和文件须已提交，忽略文件不会进入安装包。脚本重新构建发布版 App、校验缓存中的 Node，并输出 `dist/PrintChamber-<版本>-arm64.dmg` 和 `dist/SHA256SUMS`。在 `dist/` 中运行 `shasum -a 256 -c SHA256SUMS` 可核对安装包。
 
-运行 `python3 -B release/test_dmg.py -v` 验证磁盘映像、挂载后的拖放布局以及复制出的 App 和内置 Node。发布版从磁盘卷或 App Translocation 临时目录直接打开时会提示先移到「应用程序」，然后退出。实际首次启动请使用测试账户验收。
+运行 `python3 -B release/test_dmg.py -v` 验证磁盘映像、挂载后的拖放布局以及复制出的 App 和内置 Node。发布版从只读卷或 App Translocation 临时目录直接打开时会提示先移到「应用程序」，然后退出。实际首次启动请使用测试账户验收。
 
 脚本最后显示创建 GitHub 草稿发布的命令，由维护者检查产物和 `release/RELEASE_NOTES.md` 后自行执行。
 
 ## 可选的本地模型
 
-发布版「设置」中的「下载（约 16 GB）」会安装本地模型。开始或继续前要求至少 20 GB 可用空间。准备环境时显示当前步骤，下载权重时显示已下载字节和总量。关闭设置窗口后安装在后台继续，重新打开即可看到当前进度。点「暂停」或退出 App 才会暂停，下次在设置中点「继续」。安装完成后在菜单中点「启动模型」。删除需要确认，App 会先停止自己管理的服务；正在打印或无法确认已停止时保留文件。
+发布版「设置」中的「下载（约 16 GB）」会安装本地模型。首次开始需要 20 GB 可用空间。有下载进度时，继续所需空间为剩余下载量加 2 GB。准备环境时显示当前步骤，下载权重时显示已下载字节和总量。关闭设置窗口后安装在后台继续，重新打开即可看到当前进度。点「暂停」或退出 App 才会暂停，下次在设置中点「继续」。安装完成后在菜单中点「启动模型」。删除需要确认，App 会先停止自己管理的服务；正在打印或无法确认已停止时保留文件。
 
 Swift 负责引导全新账户安装：下载并验证官方 arm64 uv 0.13.9，用它安装 Python 3.12.14 和项目锁定的依赖，然后用新环境运行包内的 `installer/local_model.py`。该脚本使用 Hugging Face Hub 的匿名客户端，固定修订版 `e7b7dc27f91deacad38e78976d1f2b499d76a294`，下载 Diffusers 推理组件和 `LICENSE.md`。权重按清单中的 SHA-256 核验，普通 Git 文件按清单中的 Git 对象 ID 核验。校验失败时删除损坏文件，点「继续」会重新下载该文件。uv 缓存、解释器、阶段记录与未完成分片都位于 App 数据目录。安装提交后更新 `runtime.json`，保留其他设置。外部已配置的 Python 和模型可直接使用，删除操作只清理 App 数据目录内的安装文件及配置中的路径。
 

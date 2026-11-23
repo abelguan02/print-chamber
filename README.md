@@ -6,7 +6,7 @@
 
 ## 使用
 
-1. 在装有 Google Chrome 的 Apple Silicon Mac（macOS 13 或更高版本）上，从 [GitHub Releases](https://github.com/abelguan02/print-chamber/releases) 下载 arm64 安装包。打开 dmg，将 Print Chamber 拖到「应用程序」，推出磁盘映像后从「应用程序」打开。如果 macOS 首次拦截，到「系统设置 → 隐私与安全性」点「仍要打开」。
+1. 在装有 Google Chrome 的 Apple Silicon Mac（macOS 14 或更高版本）上，从 [GitHub Releases](https://github.com/abelguan02/print-chamber/releases) 下载 arm64 安装包。打开 dmg，将 Print Chamber 拖到「应用程序」，推出磁盘映像后从「应用程序」打开。如果 macOS 首次拦截，到「系统设置 → 隐私与安全性」点「仍要打开」。
 2. 在 App 设置中点「在访达中显示」和「打开扩展页」。在 Chrome 开启「开发者模式」，点「加载已解压的扩展程序」，选中刚才显示的 `extension` 文件夹。App 显示「已连接」后，在扩展「生成设置」选择生成方式。
 3. 云端 API 使用你自己的密钥，本机 Codex 复用已登录的本机账号。本地模型可选用，在 App 设置中下载约 16 GB 的模型后，从菜单栏点「启动模型」。
 4. 打开作品页，悬停约 1.2 秒或按住 Alt 悬停即可预览。已有打印记录会直接显示。本地模型自动打印新图；Codex 和云端 API 在你点「打印」后才上传生成。

@@ -161,8 +161,9 @@ class InstallerTests(unittest.TestCase):
             tar.addfile(member,io.BytesIO(uv))
         self.archive=buffer.getvalue()
 
-    def scenario(self,name):
+    def scenario(self,name,capacity=None):
         env={'HOME':str(self.home),'PATH':'/usr/bin:/bin','PRINT_CHAMBER_STATE':str(self.state),
+             'FIXTURE_CAPACITY':str(capacity if capacity is not None else (19_999_999_999 if name=='space' else 30_000_000_000)),
              'FIXTURE_PYTHON':str(self.runner), 'FIXTURE_URL':self.base+'/uv','FIXTURE_HASH':'0'*64 if name=='bad' else hashlib.sha256(self.archive).hexdigest()}
         result=subprocess.run([self.binary,name],env=env,capture_output=True,text=True,timeout=30)
         self.assertEqual(result.returncode,0,result.stderr+result.stdout)
@@ -178,6 +179,17 @@ class InstallerTests(unittest.TestCase):
         self.assertIn('校验失败',self.scenario('bad'))
         self.assertEqual(self.calls,[('/uv',0)])
         self.assertFalse((self.state/'python').exists())
+
+    def test_resume_checks_remaining_bytes_and_reserve(self):
+        self.assertIn('已暂停', self.scenario('pause', capacity=26_000_000_000))
+        # Model byte counts are simulated; the retained HTTP fixture stays small.
+        progress = self.state / 'model-installer/progress.json'
+        progress.write_text(json.dumps({'total': 16_000_000_000, 'downloaded': 10_000_000_000}))
+        calls = self.calls.copy()
+        self.scenario('resume-short', capacity=7_999_999_999)
+        self.assertEqual(self.calls, calls)
+        self.scenario('resume', capacity=16_000_000_000)
+        self.assertTrue(Path(json.loads(self.config.read_text())['model']).is_dir())
 
     def test_completed_uv_archive_survives_interruption_before_checkpoint(self):
         work = self.state / 'model-installer'

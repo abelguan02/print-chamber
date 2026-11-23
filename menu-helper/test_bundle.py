@@ -1,4 +1,5 @@
 """After build.py --release, test the moved bundle without installing or showing the app."""
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -56,17 +57,65 @@ class BundleTests(unittest.TestCase):
         def launch_path(path):
             return self.launch(register=True, TMPDIR=str(self.state.parent), PRINT_CHAMBER_TEST_BUNDLE_PATH=path)
 
-        for path in ['/Volumes/Print Chamber/Print Chamber.app',
-                     '/private/var/folders/x/AppTranslocation/uuid/d/Print Chamber.app']:
-            with self.subTest(path=path):
-                result = launch_path(path)
-                self.assertEqual(result, {'message': '请先将 Print Chamber 拖到"应用程序"再打开', 'button': '好'})
-                self.assertFalse(self.state.exists())
-                self.assertFalse(registration.exists())
-        for path in ['/Applications/Print Chamber.app', '/VolumesBackup/MyAppTranslocation/Print Chamber.app']:
-            with self.subTest(path=path):
-                self.assertEqual(launch_path(path)['mode'], 'app')
-                self.assertTrue(registration.is_file())
+        source = self.state.parent / 'contents'
+        source.mkdir()
+        (source / 'Print Chamber.app').mkdir()
+        mount = self.state.parent / 'mounted'
+        mount.mkdir()
+        for fmt in ('UDZO', 'UDRW'):
+            image = self.state.parent / (fmt + '.dmg')
+            subprocess.run(['hdiutil', 'create', '-quiet', '-srcfolder', source, '-fs', 'HFS+',
+                            '-volname', 'Fixture', '-format', fmt, image], check=True)
+            subprocess.run(['hdiutil', 'attach', '-quiet', '-nobrowse', '-noautoopen',
+                            '-mountpoint', mount, image], check=True)
+            try:
+                if fmt == 'UDZO':
+                    for path in [mount / 'Print Chamber.app', home / 'AppTranslocation/d/Print Chamber.app']:
+                        result = launch_path(str(path))
+                        self.assertEqual(result, {'message': '请先将 Print Chamber 拖到"应用程序"再打开', 'button': '好'})
+                        self.assertFalse(self.state.exists())
+                        self.assertFalse(registration.exists())
+                else:
+                    self.assertEqual(launch_path(str(mount / 'Print Chamber.app'))['mode'], 'app')
+                    self.assertTrue(registration.is_file())
+            finally:
+                subprocess.run(['hdiutil', 'detach', '-quiet', mount], check=True)
+        self.assertEqual(launch_path(str(self.app))['mode'], 'app')
+
+    def test_seen_timestamp_controls_extension_status(self):
+        self.state.mkdir()
+        now = datetime.now(timezone.utc)
+        for stamp, expected in [(now - timedelta(hours=1), '已连接 · v1.0'),
+                                (now - timedelta(days=8), '未加载'), ('invalid', '配对记录无效')]:
+            if isinstance(stamp, datetime):
+                stamp = stamp.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+            (self.state / 'extension-seen.json').write_text(json.dumps({'version': '1.0', 'time': stamp}))
+            self.assertEqual(self.launch()['extensionStatus'], expected)
+
+    def test_release_build_in_temporary_git_clone(self):
+        repo = self.state.parent / 'repo'
+        subprocess.run(['git', 'clone', '--quiet', '--local', '--shared', str(ROOT), repo], check=True)
+        cache = repo / '.cache/node'
+        cache.parent.mkdir()
+        shutil.copytree(ROOT / '.cache/node', cache)
+        script = [sys.executable, '-B', 'menu-helper/build.py', '--release']
+        modified = repo / 'extension/popup.js'
+        extra = repo / 'extension/local-only.txt'
+        for path in [modified, extra]:
+            with path.open('a') as output:
+                output.write('fixture')
+            result = subprocess.run(script, cwd=repo, capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(str(path.relative_to(repo)), result.stderr)
+            if path == modified:
+                subprocess.run(['git', 'restore', str(path)], cwd=repo, check=True)
+            else:
+                path.unlink()
+        (repo / 'extension/ignored.log').write_text('ignored fixture')
+        subprocess.run(script, cwd=repo, check=True)
+        extension = repo / 'dist/Print Chamber.app/Contents/Resources/extension'
+        self.assertTrue((extension / 'manifest.json').is_file())
+        self.assertFalse((extension / 'ignored.log').exists())
 
     def test_release_contents_architecture_and_signatures(self):
         info = plistlib.loads((self.app / 'Contents/Info.plist').read_bytes())
@@ -74,12 +123,15 @@ class BundleTests(unittest.TestCase):
         self.assertNotIn('ProjectRoot', info)
         self.assertEqual(info['CFBundleIdentifier'], 'local.printchamber.app')
         self.assertEqual(info['CFBundleShortVersionString'], json.loads((ROOT / 'extension/manifest.json').read_text())['version'])
-        self.assertEqual(info['LSMinimumSystemVersion'], '13.0')
+        self.assertEqual(info['LSMinimumSystemVersion'], '14.0')
         helper = self.app / 'Contents/MacOS/PrintChamberHelper'
         self.assertEqual(subprocess.check_output(['lipo', '-archs', helper], text=True).strip(), 'arm64')
-        self.assertRegex(subprocess.check_output(['otool', '-l', helper], text=True), r'minos\s+13\.0\b')
+        self.assertRegex(subprocess.check_output(['otool', '-l', helper], text=True), r'minos\s+14\.0\b')
         for folder in ['extension', 'native', 'installer']:
-            self.assertEqual(files(self.resources / folder), files(ROOT / folder))
+            tracked = subprocess.check_output(['git', 'ls-files', '-z', '--', folder], cwd=ROOT)
+            expected = {Path(os.fsdecode(name)).relative_to(folder): hashlib.sha256((ROOT / os.fsdecode(name)).read_bytes()).digest()
+                        for name in tracked.split(b'\0') if name}
+            self.assertEqual(files(self.resources / folder), expected)
         for name in ['service.py', 'runtime_config.py', 'benchmark_local.py', 'demo.html', 'requirements-macos-arm64.txt',
                      'menu-helper/controller.py', 'menu-helper/AppIcon.icns', 'menu-helper/使用说明.txt']:
             self.assertEqual((self.resources / Path(name).name).read_bytes(), (ROOT / name).read_bytes())
@@ -186,6 +238,7 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(Path(result['help']), ROOT / '菜单栏小助手说明.txt')
         self.assertFalse((self.state / 'extension').exists())
         self.assertNotIn('设置…', result['menu'])
+        self.assertNotIn('仅手动启动 · 不随登录加载模型', result['menu'])
 
 
 if __name__ == '__main__':

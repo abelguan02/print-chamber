@@ -10,10 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
+    build = subprocess.run([sys.executable, '-B', ROOT / 'menu-helper/build.py', '--release'])
+    if build.returncode:
+        sys.exit(build.returncode)
     version = json.loads((ROOT / 'extension/manifest.json').read_text())['version']
     dist = ROOT / 'dist'
     image_name = f'PrintChamber-{version}-arm64.dmg'
-    subprocess.run([sys.executable, '-B', ROOT / 'menu-helper/build.py', '--release'], check=True)
     with tempfile.TemporaryDirectory(dir=dist) as temp:
         staging = Path(temp)
         contents = staging / 'contents'

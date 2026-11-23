@@ -337,3 +337,39 @@ for (const declaredLength of [undefined, '12000001', '1']) {
     assert.equal(cancelled, true, 'rejecting an oversized body must cancel its download');
   });
 }
+
+test('worker wakes share a session heartbeat; explicit pairing and lifecycle events refresh it', async () => {
+  const session = {};
+  let calls = 0;
+  let available = true;
+  function wake() {
+    const events = {};
+    const event = name => ({addListener(fn) { (events[name] ??= []).push(fn); }});
+    const runtime = {id:'fixture', getManifest:()=>({version:'1'}), getURL:p=>'fixture/'+p,
+      onInstalled:event('installed'), onStartup:event('startup'), onMessage:event('message')};
+    const chrome = {runtime, tabs:{query:async()=>[]}, storage:{session:{
+      async get() { return {...session}; }, async set(record) { Object.assign(session,record); }
+    }}};
+    vm.runInNewContext(source, {importScripts(){}, chrome, async codexRequest() {
+      calls++;
+      if (!available) throw Error('fixture offline');
+      return {extensionVersion:'1'};
+    }});
+    return events;
+  }
+  const settled = () => new Promise(resolve=>setImmediate(resolve));
+  wake(); await settled();
+  const handlers = wake(); await settled();
+  assert.equal(calls,1);
+  for (const url of ['fixture/settings.html','fixture/popup.html']) {
+    await new Promise(resolve=>handlers.message[0]({type:'pairing-status'},{id:'fixture',url},resolve));
+  }
+  for (const event of ['startup','installed']) await Promise.all(handlers[event].map(fn=>fn()));
+  assert.equal(calls,5);
+  session.lastPairingHello -= 3600001;
+  available=false;
+  wake(); await settled();
+  available=true;
+  wake(); await settled();
+  assert.equal(calls,7);
+});

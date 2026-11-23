@@ -51,6 +51,12 @@ final class ModelInstaller {
         return try? JSONDecoder().decode(ModelProgress.self, from: data)
     }
 
+    var requiredSpace: Int64 {
+        guard let p = progress, p.downloaded >= 0, p.total > 0, p.total <= Int64.max - 2_000_000_000
+        else { return Self.minimumSpace }
+        return max(0, p.total - p.downloaded) + 2_000_000_000
+    }
+
     func resume() { lock.lock(); paused = false; lock.unlock() }
     func pause() {
         lock.lock(); defer { lock.unlock() }
@@ -119,7 +125,7 @@ final class ModelInstaller {
     func install(notify: (String) -> Void) throws {
         guard !removing else { throw InstallError("删除未完成") }
         _ = try config() // Fail before writing into a damaged configuration.
-        guard try capacity(state) >= Self.minimumSpace else { throw InstallError("磁盘空间不足") }
+        guard try capacity(state) >= requiredSpace else { throw InstallError("磁盘空间不足") }
         for url in [work, state.appendingPathComponent("python"), state.appendingPathComponent("models")] {
             if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
                 throw InstallError("安装目录为符号链接")

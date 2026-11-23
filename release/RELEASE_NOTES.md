@@ -1,4 +1,4 @@
-1. 准备一台运行 macOS 13 或更高版本的 Apple Silicon Mac，并安装 Google Chrome。Intel Mac 无法打开此 App。
+1. 准备一台运行 macOS 14 或更高版本的 Apple Silicon Mac，并安装 Google Chrome。Intel Mac 无法打开此 App。
 2. 从本页下载 arm64 的 dmg，打开后将 Print Chamber 拖到「应用程序」，推出磁盘映像，再从「应用程序」打开。
 3. 如果首次打开时 macOS 无法验证开发者，到「系统设置 → 隐私与安全性」点「仍要打开」。这是此版本未使用开发者 ID 签名和公证时的正常提示。
 4. 在 Print Chamber 设置中点「在访达中显示」，再点「打开扩展页」。在 Chrome 开启「开发者模式」，点「加载已解压的扩展程序」，选中刚才显示的 extension 文件夹。App 显示「已连接」即完成配对。

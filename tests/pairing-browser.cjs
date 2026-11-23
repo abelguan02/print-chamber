@@ -108,7 +108,8 @@ test('moved app pairs with its synchronized extension, refreshes local credentia
   assert.ok(launch(moved).settingsRows[0].includes('已连接 · v'+version));
 });
 
-test('manual pairing works in settings and popup when an available helper has no local token',async t=>{
+for (const helperError of [null, '无法读取本地连接码']) {
+test('manual pairing in both views when the helper reports '+(helperError || 'no local code'),async t=>{
   const home=await fs.mkdtemp(path.join(os.tmpdir(),'pc-manual-pairing-'));
   const extension=path.resolve(__dirname,'../extension');
   let ctx;
@@ -140,8 +141,16 @@ test('manual pairing works in settings and popup when an available helper has no
   await popup.locator('#token').waitFor({state:'hidden'});
   assert.deepEqual(await worker.evaluate(()=>chrome.storage.local.get('token')),{});
 
-  await worker.evaluate(()=>{globalThis.fixtureCode=null;});
+  await worker.evaluate(error=>{
+    globalThis.fixtureCode=null;
+    if (error) {
+      const previous=globalThis.codexRequest;
+      globalThis.codexRequest=request=>request.type==='local-token' ? Promise.resolve({error}) : previous(request);
+    }
+  },helperError);
   await settings.click('#local-check');
+  await settings.locator('#local-token').waitFor();
+  if(helperError)await settings.waitForFunction(error=>document.querySelector('#local-status').textContent===error,helperError);
   await settings.locator('#local-token').fill('fixture-settings');
   await settings.click('#local-check');
   await settings.waitForFunction(()=>document.querySelector('#local-status').textContent==='已就绪');
@@ -150,6 +159,8 @@ test('manual pairing works in settings and popup when an available helper has no
 
   const checkPopup=popup.getByRole('button',{name:'测试本地连接'});
   await checkPopup.click();
+  await popup.locator('#token').waitFor();
+  if(helperError)await popup.waitForFunction(error=>document.querySelector('#status').textContent===error,helperError);
   await popup.locator('#token').fill('fixture-popup-manual');
   await checkPopup.click();
   await popup.waitForFunction(()=>document.querySelector('#dashboard-lcd').textContent==='READY');
@@ -159,3 +170,4 @@ test('manual pairing works in settings and popup when an available helper has no
   await settings.waitForFunction(()=>document.querySelector('#notice').textContent==='已保存');
   assert.equal((await worker.evaluate(()=>chrome.storage.local.get('token'))).token,'fixture-settings');
 });
+}

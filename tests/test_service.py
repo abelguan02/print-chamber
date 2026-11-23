@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 from pathlib import Path
 import socket
 import stat
@@ -100,6 +101,29 @@ class ServiceTests(unittest.TestCase):
         with self.service.lock:
             self.assertEqual(self.request()[0], 409)
         self.assertEqual(self.calls, 0)
+
+    def test_extension_origin_matches_native_identity(self):
+        native = subprocess.check_output(['node', '-p', "require('./native/identity.cjs').id"], cwd=ROOT, text=True).strip()
+        self.assertEqual(self.service.EXTENSION_ORIGIN, 'chrome-extension://' + native)
+
+    def test_only_trusted_origins_receive_cors(self):
+        port = self.service.PORT
+        for origin in [None, f'http://127.0.0.1:{port}', f'http://localhost:{port}',
+                       self.service.EXTENSION_ORIGIN, 'chrome-extension://' + 'a' * 32]:
+            with self.subTest(origin=origin):
+                c = http.client.HTTPConnection('127.0.0.1', port, timeout=5)
+                try:
+                    c.request('OPTIONS', '/health', headers={} if origin is None else {'Origin': origin})
+                    response = c.getresponse()
+                    if origin and origin.endswith('a' * 32):
+                        self.assertEqual(response.status, 403)
+                        self.assertIsNone(response.getheader('Access-Control-Allow-Origin'))
+                    else:
+                        self.assertEqual(response.status, 204)
+                        if origin:
+                            self.assertEqual(response.getheader('Access-Control-Allow-Origin'), origin)
+                finally:
+                    c.close()
 
     def test_refresh_changes_seed_and_caches_the_new_result(self):
         first = self.request()[1]

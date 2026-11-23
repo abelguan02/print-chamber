@@ -179,17 +179,28 @@ async function pairingStatus() {
   } catch { return {available:false, update:false}; }
 }
 async function pairLocal(checkOnly) {
-  const {token} = await codexRequest({type:'local-token'});
+  const result = await codexRequest({type:'local-token'});
+  if (result.error) throw Error(result.error);
+  const {token} = result;
   if (!token) return {paired:false};
   if (!checkOnly) await chrome.storage.local.set({token});
   return {paired:true};
 }
-// Each worker startup announces the version Chrome actually loaded.
+// Concurrent pairing requests share one native connection.
 let pendingHello;
 function hello() {
-  return pendingHello ??= pairingStatus().finally(() => { pendingHello = null; });
+  return pendingHello ??= pairingStatus().then(async status => {
+    if (status.available) await chrome.storage.session.set({lastPairingHello:Date.now()});
+    return status;
+  }).finally(() => { pendingHello = null; });
 }
-hello().catch(() => {});
+async function announceOnWake() {
+  const {lastPairingHello} = await chrome.storage.session.get('lastPairingHello');
+  if (lastPairingHello && Date.now() - lastPairingHello < 3600000) return;
+  await hello();
+}
+announceOnWake().catch(() => {});
+chrome.runtime.onInstalled.addListener(hello);
 chrome.runtime.onStartup?.addListener(hello);
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if(typeof message?.type!=='string')return;
@@ -197,7 +208,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     const trusted = ['settings.html','popup.html'].some(page => sender.url === chrome.runtime.getURL(page));
     if (sender.id !== chrome.runtime.id || !trusted) { reply({error:'仅扩展配置页面可配对'}); return; }
     const operation = message.type === 'pairing-status' ? hello() : pairLocal(message.checkOnly === true);
-    operation.then(reply).catch(() => reply({error:'无法取得本地连接码'}));
+    operation.then(reply).catch(error => reply({error:error.message || '无法取得本地连接码'}));
     return true;
   }
   if(message.type.startsWith('cloud-') || ['codex-detect','codex-connect'].includes(message.type)){

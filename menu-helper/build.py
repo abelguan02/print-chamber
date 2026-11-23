@@ -56,28 +56,42 @@ def copy_node(resources):
         raise RuntimeError(f'Node 版本不符：{version}')
 
 
-def assemble(app, release):
+RELEASE_PATHS = ['extension', 'native', 'installer', 'menu-helper', 'service.py', 'runtime_config.py',
+                 'benchmark_local.py', 'demo.html', 'requirements-macos-arm64.txt']
+
+
+def export_release_sources(destination):
+    git = ['git', '-C', str(ROOT), '-c', 'core.quotePath=false']
+    changes = subprocess.check_output(git + ['status', '--porcelain', '--untracked-files=all', '--', *RELEASE_PATHS])
+    if changes:
+        raise SystemExit('发布构建已拒绝，请先提交以下文件的改动：\n' + os.fsdecode(changes).rstrip())
+    tracked = subprocess.check_output(git + ['ls-files', '-z', '--', *RELEASE_PATHS])
+    subprocess.run(git + ['checkout-index', '--prefix=' + str(destination) + '/', '-z', '--stdin'],
+                   input=tracked, check=True)
+
+
+def assemble(app, release, source=ROOT):
     contents = app / 'Contents'
     resources = contents / 'Resources'
     (contents / 'MacOS').mkdir(parents=True, exist_ok=True)
     resources.mkdir(exist_ok=True)
-    shutil.copyfile(ROOT / 'menu-helper/AppIcon.icns', resources / 'AppIcon.icns')
-    version = json.loads((ROOT / 'extension/manifest.json').read_text())['version']
+    shutil.copyfile(source / 'menu-helper/AppIcon.icns', resources / 'AppIcon.icns')
+    version = json.loads((source / 'extension/manifest.json').read_text())['version']
     info = dict(CFBundleExecutable='PrintChamberHelper',
                 CFBundleIdentifier='local.printchamber.app' if release else 'local.printchamber.helper',
                 CFBundleName=app.stem, CFBundlePackageType='APPL', CFBundleIconFile='AppIcon',
                 CFBundleShortVersionString=version, CFBundleVersion='1', LSUIElement=True,
-                NSHighResolutionCapable=True, LSMinimumSystemVersion='13.0',
+                NSHighResolutionCapable=True, LSMinimumSystemVersion='14.0',
                 PrintChamberMode='app' if release else 'dev')
     if release:
         for name in ['service.py', 'runtime_config.py', 'requirements-macos-arm64.txt', 'benchmark_local.py', 'demo.html']:
-            shutil.copyfile(ROOT / name, resources / name)
-        shutil.copyfile(ROOT / 'menu-helper/controller.py', resources / 'controller.py')
-        shutil.copyfile(ROOT / 'menu-helper/使用说明.txt', resources / '使用说明.txt')
+            shutil.copyfile(source / name, resources / name)
+        shutil.copyfile(source / 'menu-helper/controller.py', resources / 'controller.py')
+        shutil.copyfile(source / 'menu-helper/使用说明.txt', resources / '使用说明.txt')
         for name in ['extension', 'native', 'installer']:
-            shutil.copytree(ROOT / name, resources / name, ignore=shutil.ignore_patterns('.DS_Store', '__pycache__'))
+            shutil.copytree(source / name, resources / name, ignore=shutil.ignore_patterns('.DS_Store', '__pycache__'))
         launcher = resources / 'print-chamber-host'
-        shutil.copyfile(ROOT / 'menu-helper/print-chamber-host', launcher)
+        shutil.copyfile(source / 'menu-helper/print-chamber-host', launcher)
         launcher.chmod(0o755)
         # Shell scripts are sealed as resources. Chrome uses the stable entry in MacOS.
         (contents / 'MacOS/print-chamber-host').symlink_to('../Resources/print-chamber-host')
@@ -85,9 +99,9 @@ def assemble(app, release):
     else:
         info['ProjectRoot'] = str(ROOT)
     (contents / 'Info.plist').write_bytes(plistlib.dumps(info))
-    target = ['-target', 'arm64-apple-macos13'] if release else []
+    target = ['-target', 'arm64-apple-macos14'] if release else []
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-O', *target, '-module-cache-path',
-                    '/tmp/print-chamber-swift-cache', ROOT / 'menu-helper/main.swift', ROOT / 'menu-helper/ModelInstaller.swift',
+                    '/tmp/print-chamber-swift-cache', source / 'menu-helper/main.swift', source / 'menu-helper/ModelInstaller.swift',
                     '-o', contents / 'MacOS/PrintChamberHelper'], check=True)
     # Sign the outer app only. Never recursively re-sign the official Node executable.
     subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', app], check=True)
@@ -101,7 +115,9 @@ def build(release=False):
         app = dist / 'Print Chamber.app'
         with tempfile.TemporaryDirectory(dir=dist) as tmp:
             staged = Path(tmp) / app.name
-            assemble(staged, True)
+            source = Path(tmp) / 'source'
+            export_release_sources(source)
+            assemble(staged, True, source)
             backup = Path(tmp) / 'previous.app'
             if app.exists():
                 app.rename(backup)

@@ -1,5 +1,7 @@
 Print Chamber
 
+系统要求：Apple Silicon Mac，macOS 14 或更高版本。
+
 打开 App 后，点菜单栏的打印机图标进入菜单。
 首次打开的设置窗口可以在访达中显示扩展，并打开 Chrome 扩展页。
 Chrome 扩展副本位于 ~/Library/Application Support/Print Chamber/extension/。

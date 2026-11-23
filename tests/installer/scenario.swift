@@ -12,7 +12,7 @@ let scenario = CommandLine.arguments[1]
 let helper = Helper()
 helper.installer = ModelInstaller(state: helper.paths.state, resources: helper.root,
     source: URL(string: env["FIXTURE_URL"]!)!, digest: env["FIXTURE_HASH"]!,
-    capacity: { _ in scenario == "space" ? 19_999_999_999 : 30_000_000_000 })
+    capacity: { _ in Int64(env["FIXTURE_CAPACITY"]!)! })
 try helper.prepareRuntime(registerHost: false)
 let menu = helper.makeMenu(), grid = helper.makeSettingsGrid()
 func controls(_ installed: Bool) {
@@ -35,11 +35,11 @@ if scenario == "timer" {
     waitFor { helper.interpreter == nil }
     controls(false)
     helper.timer?.invalidate()
-} else if scenario == "space" {
+} else if ["space", "resume-short"].contains(scenario) {
     require(!helper.modelAction.isEnabled && helper.modelLabel.stringValue == "磁盘空间不足", "space not enforced")
     helper.beginInstall()
     waitFor { helper.modelJob == nil }
-    require(!helper.installer.incomplete, "created a partial install with insufficient space")
+    require(helper.installer.incomplete == (scenario == "resume-short"), "changed pending state with insufficient space")
 } else if ["external", "delete", "busy"].contains(scenario) {
     controls(true)
     helper.removeModel()
@@ -47,7 +47,7 @@ if scenario == "timer" {
     if scenario == "busy" { require(helper.interpreter != nil && helper.installNotice == "模型未停止", "removed running model") }
     else { controls(false) }
 } else {
-    if scenario == "resume" { require(helper.modelAction.title == "继续", "missing resumable session") }
+    if scenario == "resume" { require(helper.modelAction.title == "继续" && helper.modelAction.isEnabled, "missing resumable session") }
     let previous = helper.installer.progress?.downloaded ?? 0
     helper.beginInstall()
     if ["pause", "close", "quit"].contains(scenario) {
