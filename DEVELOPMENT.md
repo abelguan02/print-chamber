@@ -56,6 +56,14 @@ python3 -B menu-helper/test_bundle.py -v
 
 构建后运行 `node --test tests/pairing-browser.cjs` 检查从搬移、登记到 Chrome 配对的完整路径，使用独立的临时 HOME、无窗口 Chromium 和模拟的本地健康检查。原生配对协议测试包含在 `npm test`。
 
+## 制作安装包
+
+在 Apple Silicon Mac 的仓库根目录运行 `npm run release`。版本读取自 `extension/manifest.json`，更新时同步 npm 的版本和锁文件。脚本重新构建发布版 App、校验缓存中的 Node，并输出 `dist/PrintChamber-<版本>-arm64.dmg` 和 `dist/SHA256SUMS`。在 `dist/` 中运行 `shasum -a 256 -c SHA256SUMS` 可核对安装包。
+
+运行 `python3 -B release/test_dmg.py -v` 验证磁盘映像、挂载后的拖放布局以及复制出的 App 和内置 Node。发布版从磁盘卷或 App Translocation 临时目录直接打开时会提示先移到「应用程序」，然后退出。实际首次启动请使用测试账户验收。
+
+脚本最后显示创建 GitHub 草稿发布的命令，由维护者检查产物和 `release/RELEASE_NOTES.md` 后自行执行。
+
 ## 可选的本地模型
 
 发布版「设置」中的「下载（约 16 GB）」会安装本地模型。开始或继续前要求至少 20 GB 可用空间。准备环境时显示当前步骤，下载权重时显示已下载字节和总量。关闭设置窗口后安装在后台继续，重新打开即可看到当前进度。点「暂停」或退出 App 才会暂停，下次在设置中点「继续」。安装完成后在菜单中点「启动模型」。删除需要确认，App 会先停止自己管理的服务；正在打印或无法确认已停止时保留文件。

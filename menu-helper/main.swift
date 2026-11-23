@@ -700,8 +700,34 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 }
 
+func requiresAppMove(_ bundleURL: URL) -> Bool {
+    let components = bundleURL.standardizedFileURL.pathComponents
+    return components.dropFirst().first == "Volumes" || components.contains("AppTranslocation")
+}
+
 // Exercise the packaged startup paths and menu without installing a status-bar item.
-if CommandLine.arguments.contains("--self-test") {
+let selfTesting = CommandLine.arguments.contains("--self-test")
+let testPath = selfTesting ? ProcessInfo.processInfo.environment["PRINT_CHAMBER_TEST_BUNDLE_PATH"] : nil
+if Bundle.main.object(forInfoDictionaryKey: "PrintChamberMode") as? String == "app",
+   requiresAppMove(Bundle.main.bundleURL) || testPath.map({ requiresAppMove(URL(fileURLWithPath: $0)) }) == true {
+    let message = "请先将 Print Chamber 拖到\"应用程序\"再打开"
+    let button = "好"
+    if selfTesting {
+        let report = try JSONEncoder().encode(["message": message, "button": button])
+        print(String(decoding: report, as: UTF8.self))
+    } else {
+        let application = NSApplication.shared
+        application.setActivationPolicy(.accessory)
+        application.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.addButton(withTitle: button)
+        alert.runModal()
+    }
+    exit(0)
+}
+
+if selfTesting {
     do {
         let helper = Helper()
         let register = CommandLine.arguments.contains("--test-registration")

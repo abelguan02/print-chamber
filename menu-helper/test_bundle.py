@@ -39,13 +39,34 @@ class BundleTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.state = Path(temp.name) / 'test state'
 
-    def launch(self, app=None, **overrides):
+    def launch(self, app=None, *, register=False, **overrides):
         env = {'PATH': '/usr/bin:/bin', 'HOME': str(self.state.parent / 'home'),
                'PRINT_CHAMBER_STATE': str(self.state), **overrides}
         executable = (app or self.app) / 'Contents/MacOS/PrintChamberHelper'
-        output = subprocess.check_output([executable, '--self-test'], cwd=self.folder,
+        args = [executable, '--self-test'] + (['--test-registration'] if register else [])
+        output = subprocess.check_output(args, cwd=self.folder,
                                          env=env, text=True, timeout=15)
         return json.loads(output)
+
+    def test_disk_image_and_translocation_stop_before_initialization(self):
+        home = self.state.parent / 'home'
+        home.mkdir()
+        registration = home / 'Library/Application Support/Google/Chrome/NativeMessagingHosts/com.printchamber.codex.json'
+
+        def launch_path(path):
+            return self.launch(register=True, TMPDIR=str(self.state.parent), PRINT_CHAMBER_TEST_BUNDLE_PATH=path)
+
+        for path in ['/Volumes/Print Chamber/Print Chamber.app',
+                     '/private/var/folders/x/AppTranslocation/uuid/d/Print Chamber.app']:
+            with self.subTest(path=path):
+                result = launch_path(path)
+                self.assertEqual(result, {'message': '请先将 Print Chamber 拖到"应用程序"再打开', 'button': '好'})
+                self.assertFalse(self.state.exists())
+                self.assertFalse(registration.exists())
+        for path in ['/Applications/Print Chamber.app', '/VolumesBackup/MyAppTranslocation/Print Chamber.app']:
+            with self.subTest(path=path):
+                self.assertEqual(launch_path(path)['mode'], 'app')
+                self.assertTrue(registration.is_file())
 
     def test_release_contents_architecture_and_signatures(self):
         info = plistlib.loads((self.app / 'Contents/Info.plist').read_bytes())
