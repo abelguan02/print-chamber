@@ -34,5 +34,8 @@ const Pairing = (() => {
       }
     };
   }
-  return {ready, bindManualEntry};
+  function compatibleHealth(health) {
+    return health && ['ready','failed','busy'].every(key => typeof health[key] === 'boolean');
+  }
+  return {ready, bindManualEntry, compatibleHealth};
 })();

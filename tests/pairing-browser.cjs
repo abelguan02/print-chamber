@@ -162,6 +162,12 @@ test('manual pairing in both views when the helper reports '+(helperError || 'no
   await popup.locator('#token').waitFor();
   if(helperError)await popup.waitForFunction(error=>document.querySelector('#status').textContent===error,helperError);
   await popup.locator('#token').fill('fixture-popup-manual');
+  await popup.route('http://127.0.0.1:8877/health',route=>route.fulfill({json:{}}));
+  await checkPopup.click();
+  await popup.waitForFunction(()=>document.querySelector('#status').textContent==='不是兼容的本地服务');
+  assert.deepEqual(await worker.evaluate(()=>chrome.storage.local.get(['generationMode','token'])),{});
+  assert.equal(await popup.locator('#setup').isVisible(),true);
+  await popup.unroute('http://127.0.0.1:8877/health');
   await checkPopup.click();
   await popup.waitForFunction(()=>document.querySelector('#dashboard-lcd').textContent==='READY');
   assert.equal(checked.at(-1),'Bearer fixture-popup-manual');
@@ -171,3 +177,34 @@ test('manual pairing in both views when the helper reports '+(helperError || 'no
   assert.equal((await worker.evaluate(()=>chrome.storage.local.get('token'))).token,'fixture-settings');
 });
 }
+
+test('cloud settings remain usable while both native lookups wait or fail', async t=>{
+  const home=await fs.mkdtemp(path.join(os.tmpdir(),'pc-slow-helper-'));
+  const extension=path.resolve(__dirname,'../extension');
+  let ctx;
+  t.after(async()=>{await ctx?.close();await fs.rm(home,{recursive:true,force:true});});
+  ctx=await chromium.launchPersistentContext(path.join(home,'profile'),{headless:true,executablePath,
+    env:{...process.env,HOME:home},args:['--disable-extensions-except='+extension,'--load-extension='+extension]});
+  const worker=ctx.serviceWorkers()[0]||await ctx.waitForEvent('serviceworker');
+  await worker.evaluate(()=>{
+    globalThis.waiting={};
+    globalThis.codexRequest=req=>new Promise((resolve,reject)=>{waiting[req.type]=reject;});
+  });
+  const settings=await ctx.newPage();
+  await settings.goto(origin+'settings.html');
+  await settings.waitForFunction(()=>!document.querySelector('#fields').disabled);
+  await settings.fill('#key','fixture-key');
+  settings.once('dialog',dialog=>dialog.accept());
+  await settings.click('#save-settings');
+  await settings.waitForFunction(()=>document.querySelector('#notice').textContent==='已启用云端生成');
+  await worker.evaluate(()=>{
+    for (const type of ['detect','hello']) {
+      if (!waiting[type]) throw Error('fixture not waiting for '+type);
+      waiting[type](Error('fixture offline'));
+    }
+  });
+  assert.equal(await settings.evaluate(()=>Pairing.ready),false);
+  assert.equal(await settings.locator('#fields').isEnabled(),true);
+  assert.equal(await settings.locator('#notice').innerText(),'已启用云端生成');
+  assert.equal((await worker.evaluate(()=>chrome.storage.local.get('generationMode'))).generationMode,'cloud');
+});

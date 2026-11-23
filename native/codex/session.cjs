@@ -65,6 +65,7 @@ async function startImageThread(client,cwd,model) {
 // Accept only the submitted turn. A notification can arrive before its RPC reply.
 async function printTurn({client, threadId, listen, inputPath, temp, sourceSha, prompt}) {
   let turnId, timer, finish, ended=false, observedImage=false;
+  let completedItem, candidateImage;
   const complete = new Promise(resolve=>{finish=resolve;});
   listen((method,params)=>{
     if (ended || params?.threadId!==threadId) return;
@@ -73,10 +74,20 @@ async function printTurn({client, threadId, listen, inputPath, temp, sourceSha, 
     turnId=id;
     if (params.item?.type==='imageGeneration') observedImage=true;
     if (method==='item/completed' && params.item?.type==='imageGeneration') {
-      ended=true; finish({item:params.item});
+      completedItem=params.item;
+      if (completedItem.failure || completedItem.status==='failed') {
+        ended=true; finish({item:completedItem});
+      } else if (completedItem.result || completedItem.savedPath) {
+        candidateImage=collectImage(completedItem,temp,temp,1,sourceSha);
+        if (candidateImage.outputImage) {
+          ended=true; finish({item:completedItem,image:candidateImage});
+        }
+      }
     } else if (method==='turn/completed') {
       ended=true;
-      finish({item:params.turn.items?.find(i=>i.type==='imageGeneration'),error:params.turn.error?.codexErrorInfo});
+      const finalItem=params.turn.items?.find(i=>i.type==='imageGeneration' && (!completedItem?.id || i.id===completedItem.id));
+      const item=finalItem ? {...completedItem,...finalItem} : completedItem;
+      finish({item,image:finalItem ? undefined : candidateImage,error:params.turn.error?.codexErrorInfo});
     }
   });
   const start=performance.now();
@@ -93,7 +104,7 @@ async function printTurn({client, threadId, listen, inputPath, temp, sourceSha, 
     const seconds=(performance.now()-start)/1000;
     if(result.error==='usageLimitExceeded' || result.item?.failure?.type==='usageLimitExceeded')throw Error('Codex 额度已用完');
     if(!result.item)throw Error(observedImage?'图片工具未返回有效图片':'未收到图片工具调用');
-    const image=collectImage(result.item,temp,temp,1,sourceSha);
+    const image=result.image ?? collectImage(result.item,temp,temp,1,sourceSha);
     if(!image.outputImage || image.referenceHashMatched===false)throw Error(image.error || '参考原画不匹配');
     return {...image,seconds};
   } finally {

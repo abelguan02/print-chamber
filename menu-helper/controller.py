@@ -25,7 +25,7 @@ def command(*args):
     return result.stdout.strip()
 
 def owner():
-    pids = command('/usr/sbin/lsof', '-nP', '-tiTCP:8877', '-sTCP:LISTEN').splitlines()
+    pids = command('/usr/sbin/lsof', '-nP', f'-tiTCP:{PORT}', '-sTCP:LISTEN').splitlines()
     if not pids:
         return None
     pid = int(pids[0])
@@ -34,6 +34,13 @@ def owner():
     expected = str(ROOT / 'service.py')
     known = (args.endswith(' ' + expected) or
              (args.endswith(' service.py') and ('n' + str(ROOT)) in cwd.splitlines()))
+    # A moved bundle leaves the launch path in argv. The original controller
+    # directed both output streams to this installation's private service log.
+    if not known and os.environ.get('PRINT_CHAMBER_MODE') == 'app' and args.endswith('.app/Contents/Resources/service.py'):
+        log = STATE / 'service.log'
+        if log.is_file():
+            descriptors = command('/usr/sbin/lsof', '-a', '-p', str(pid), '-d', '1,2', '-Ff', '--', str(log))
+            known = set(descriptors.splitlines()) == {f'p{pid}', 'f1', 'f2'}
     return pid, known
 
 def status():

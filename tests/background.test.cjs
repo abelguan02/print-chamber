@@ -16,14 +16,14 @@ function deferred() {
   const promise = new Promise(r => { resolve = r; });
   return {promise, resolve};
 }
-function harness({history = [], generate, download, localResponse, generationMode = 'local'} = {}) {
+function harness({history = [], generate, download, localResponse, verified = async()=>{}, generationMode = 'local'} = {}) {
   const storage = {token: 'test-token', enabled: true, disabledSites: [], history, generationMode};
   const requests = [];
   const cloudRequests = [];
   const downloads = [];
   let listener;
   const chrome = {
-    runtime: {id: 'test-extension', getPlatformInfo: async()=>({}), onInstalled: {addListener() {}}, onMessage: {addListener(fn) {listener = fn;}}},
+    runtime: {id: 'test-extension', getURL: p=>'fixture/'+p, getPlatformInfo: async()=>({}), onInstalled: {addListener() {}}, onMessage: {addListener(fn) {listener = fn;}}},
     storage: {local: {
       async get(keys) {
         const selected = typeof keys === 'string' ? [keys] : keys;
@@ -49,7 +49,7 @@ function harness({history = [], generate, download, localResponse, generationMod
     };
     return {ok: true, json: async () => structuredClone({promptHash, ...payload})};
   }
-  const CloudConfig = {active: async()=>({provider:'test-cloud',model:'test-model'}), verified:async()=>{}};
+  const CloudConfig = {active: async()=>({provider:'test-cloud',model:'test-model'}), verified};
   const Cloud = {generate: async(config, blob)=>{
     cloudRequests.push({config,blob});
     return {image:image(await blob.text()),seconds:1,provider:config.provider,model:config.model};
@@ -58,7 +58,7 @@ function harness({history = [], generate, download, localResponse, generationMod
   const sender = {id: chrome.runtime.id, tab: {url: 'https://www.artstation.com/artwork/test', title: 'Test artwork'}};
   return {
     storage, requests, downloads, cloudRequests,
-    send(message) {return new Promise(resolve => {if (!listener(message, sender, resolve)) resolve();});},
+    send(message, from=sender) {return new Promise(resolve => {if (!listener(message, from, resolve)) resolve();});},
     print(bytes = 'first', extra = {}) {
       return this.send({type: 'generate', url: pictureURL, data: image(bytes), ...extra});
     }
@@ -372,4 +372,17 @@ test('worker wakes share a session heartbeat; explicit pairing and lifecycle eve
   available=true;
   wake(); await settled();
   assert.equal(calls,7);
+});
+
+test('a verification write failure preserves paid images for both printing and trial', async () => {
+  const app=harness({generationMode:'cloud',verified:async()=>{throw Error('fixture storage failure');}});
+  const printed=await app.print('art',{confirmed:true});
+  assert.equal(printed.image,image('art'));
+  assert.equal(printed.verificationSaveFailed,true);
+  assert.equal(app.storage.history[0].image,printed.image);
+  const trial=await app.send({type:'cloud-trial',confirmed:true,data:image('trial')},
+    {id:'test-extension',url:'fixture/settings.html'});
+  assert.equal(trial.image,image('trial'));
+  assert.equal(trial.verificationSaveFailed,true);
+  assert.equal(app.cloudRequests.length,2);
 });

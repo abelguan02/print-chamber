@@ -191,6 +191,13 @@ class InstallerTests(unittest.TestCase):
         self.scenario('resume', capacity=16_000_000_000)
         self.assertTrue(Path(json.loads(self.config.read_text())['model']).is_dir())
 
+    def test_new_install_ignores_completed_download_progress(self):
+        work = self.state / 'model-installer'
+        work.mkdir()
+        (work / 'progress.json').write_text(json.dumps({'total': 16_000_000_000, 'downloaded': 16_000_000_000}))
+        self.scenario('space', capacity=2_000_000_000)
+        self.assertEqual(self.calls, [])
+
     def test_completed_uv_archive_survives_interruption_before_checkpoint(self):
         work = self.state / 'model-installer'
         work.mkdir()

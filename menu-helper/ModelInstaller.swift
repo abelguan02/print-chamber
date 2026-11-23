@@ -52,7 +52,7 @@ final class ModelInstaller {
     }
 
     var requiredSpace: Int64 {
-        guard let p = progress, p.downloaded >= 0, p.total > 0, p.total <= Int64.max - 2_000_000_000
+        guard incomplete, let p = progress, p.downloaded >= 0, p.total > 0, p.total <= Int64.max - 2_000_000_000
         else { return Self.minimumSpace }
         return max(0, p.total - p.downloaded) + 2_000_000_000
     }
@@ -136,6 +136,8 @@ final class ModelInstaller {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
         if !incomplete {
+            let previousProgress = work.appendingPathComponent("progress.json")
+            if fm.fileExists(atPath: previousProgress.path) { try fm.removeItem(at: previousProgress) }
             // Completion markers apply only to one install, even if its runtime was later removed.
             for name in ["uv", "python", "venv", "dependencies", "snapshot"] {
                 let done = work.appendingPathComponent(name + ".done")

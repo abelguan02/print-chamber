@@ -25,7 +25,7 @@ globalThis.LocalSettings = (() => {
    if(response.status===401||response.status===403){status.textContent='连接码不匹配';return;}
    if(!response.ok){status.textContent='服务异常 · HTTP '+response.status;return;}
    const health=await response.json();
-   if(!health||typeof health.ready!=='boolean'||typeof health.failed!=='boolean'||typeof health.busy!=='boolean'){status.textContent='不是兼容的本地服务';return;}
+   if(!Pairing.compatibleHealth(health)){status.textContent='不是兼容的本地服务';return;}
    status.textContent=health.failed?'模型加载失败 · 查看小助手日志':!health.ready?'模型加载中':health.busy?'模型忙碌':'已就绪';
   }catch(error){
    if(signal.aborted||error.name==='TimeoutError')status.textContent='连接超时';

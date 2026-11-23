@@ -62,7 +62,6 @@ async function generate(message, tab) {
     }else if(generationMode==='cloud'){
       const config=await CloudConfig.active();
       data=await cloudGenerate(config,blob);
-      await CloudConfig.verified(config);
     }else{
     const response = await fetch(ENDPOINT + '/generate', {
       method: 'POST', headers: {'Content-Type': 'application/octet-stream', 'Authorization': 'Bearer ' + token,
@@ -99,7 +98,12 @@ async function generate(message, tab) {
 async function cloudGenerate(config,blob){
   // Keep the MV3 worker alive during a user-requested long-running image call.
   const keepAlive=setInterval(()=>chrome.runtime.getPlatformInfo().catch(()=>{}),20000);
-  try{return await Cloud.generate(config,blob,CLOUD_PROMPT);}finally{clearInterval(keepAlive);}
+  try {
+    const result = await Cloud.generate(config,blob,CLOUD_PROMPT);
+    try { await CloudConfig.verified(config); }
+    catch { result.verificationSaveFailed = true; }
+    return result;
+  } finally { clearInterval(keepAlive); }
 }
 
 async function cloudAction(message){
@@ -121,7 +125,7 @@ async function cloudAction(message){
     if(message.type==='cloud-trial'){
       if(message.confirmed!==true || typeof message.data!=='string' || message.data.length>5000000 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(message.data))throw Error('请选择参考图并确认试生成费用');
       const blob=await (await fetch(message.data)).blob();
-      const result=await cloudGenerate(c,blob);await CloudConfig.verified(c);return result;
+      return await cloudGenerate(c,blob);
     }
     throw Error('不支持的操作');
   }finally{busy=false;}

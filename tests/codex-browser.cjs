@@ -47,6 +47,7 @@ test('Codex one-click login, failures, explicit printing and history', {skip:pro
         return {image,model:'test',provider:'codex',seconds:5.75};
        }).finally(()=>process.stdin.destroy());`,{mode:0o700});
     ctx=await chromium.launchPersistentContext(dir,{headless:true,executablePath,env:{...process.env, HOME:dir},args:['--disable-extensions-except='+ext,'--load-extension='+ext]});
+    await ctx.route('http://127.0.0.1:8877/health',route=>route.fulfill({json:{ready:true,failed:false,busy:false}}));
     const worker=ctx.serviceWorkers()[0]||await ctx.waitForEvent('serviceworker');
     assert.equal(new URL(worker.url()).host,id);
     await worker.evaluate(image=>{
@@ -86,6 +87,10 @@ test('Codex one-click login, failures, explicit printing and history', {skip:pro
       else assert.ok(!(await fs.readFile(calls,'utf8')).includes('connect'));
     }
     await settings.selectOption('#mode','local');
+    await settings.click('#save-settings');
+    await settings.waitForFunction(()=>document.querySelector('#notice').textContent==='请先填写本地连接码');
+    assert.equal((await worker.evaluate(()=>chrome.storage.local.get('generationMode'))).generationMode,'codex');
+    await settings.fill('#local-token','fixture-local');
     await settings.click('#save-settings');
     await settings.waitForFunction(()=>document.querySelector('#notice').textContent==='已保存');
     await settings.reload();await ready();await settings.selectOption('#mode','codex');

@@ -62,7 +62,7 @@ python3 -B menu-helper/test_bundle.py -v
 
 运行 `python3 -B release/test_dmg.py -v` 验证磁盘映像、挂载后的拖放布局以及复制出的 App 和内置 Node。发布版从只读卷或 App Translocation 临时目录直接打开时会提示先移到「应用程序」，然后退出。实际首次启动请使用测试账户验收。
 
-脚本最后显示创建 GitHub 草稿发布的命令，由维护者检查产物和 `release/RELEASE_NOTES.md` 后自行执行。
+脚本最后显示创建 GitHub 草稿发布的命令，由维护者检查产物和 `release/RELEASE_NOTES.md` 后自行执行。命令固定本次构建的提交和 dmg 文件名，并先检查远端同名标签。标签指向其他提交或无法读取远端时会停止。
 
 ## 可选的本地模型
 

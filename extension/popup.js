@@ -34,12 +34,13 @@ async function check(token,today=0){
   const response=await fetch('http://127.0.0.1:8877/health',{headers:token?{Authorization:'Bearer '+token}:{},signal:AbortSignal.timeout(2000)});
   const health=await response.json();
   if(!response.ok){setView(false);note(response.status===401?'连接码不匹配':(health.error||'连接码无效'));return false}
+  if(!Pairing.compatibleHealth(health)){setView(false);note('不是兼容的本地服务');return false}
   if(!token)return false;
   if(health.failed){note('模型加载失败')}
   else if(health.ready){label=health.busy?'PRINTING':'READY';detail=health.busy?'MODEL BUSY':'MODEL OK';color=health.busy?'#F4B53A':'#7BE07B';note()}
   else {label='LOADING';detail='MODEL WAIT';color='#F4B53A';note('模型准备中')}
   setView(true);
- }catch{note('模型未启动')}
+ }catch(error){note(error instanceof SyntaxError?'不是兼容的本地服务':'模型未启动')}
  }
  $('#dashboard-lcd').textContent=label;$('#dashboard-lcd').style.color=color;$('#dashboard-lcd').style.textShadow='0 0 8px '+color+'88';
  $('#model-info').replaceChildren(document.createTextNode(detail),document.createElement('br'),document.createTextNode(today+' TODAY'));

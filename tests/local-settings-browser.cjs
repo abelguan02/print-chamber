@@ -27,6 +27,9 @@ test('Local setup: first use, state checks, shared token persistence and cloud m
   assert.equal(await page.locator('.hint, details, .consent').count(),0);
   await page.click('#local-check');assert.equal(await page.locator('#local-status').innerText(),'未配置');
   await worker.evaluate(()=>chrome.storage.local.set({generationMode:'cloud'}));
+  await page.click('#save-settings');
+  await page.waitForFunction(()=>document.querySelector('#notice').textContent==='请先填写本地连接码');
+  assert.deepEqual(await worker.evaluate(()=>chrome.storage.local.get(['generationMode','token'])),{generationMode:'cloud'});
   await popup.waitForFunction(()=>document.querySelector('#status').textContent==='云端 · 未验证');
   await worker.evaluate(()=>chrome.storage.local.set({cloudVerified:true}));
   await popup.waitForFunction(()=>document.querySelector('#status').textContent==='云端 · 已验证');
