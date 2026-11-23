@@ -159,6 +159,17 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var missingLabel = "本地模型未安装"
     var settingsWindow: NSWindow?
     var settingsTimer: Timer?
+    lazy var installer = ModelInstaller(state: paths.state, resources: root)
+    enum ModelJob { case install, remove }
+    var modelJob: ModelJob?
+    var installNotice: String?
+    var pausing = false
+    var replyWhenIdle: (() -> Void)?
+    let modelLabel = NSTextField(labelWithString: "未安装")
+    let modelAction = NSButton()
+    let modelProgress = NSProgressIndicator()
+    let byteLabel = NSTextField(labelWithString: "")
+    var progressView: NSStackView?
     let extensionLabel = NSTextField(labelWithString: "未加载")
     let codexLabel = NSTextField(labelWithString: "检测中…")
     var detectingCodex = false
@@ -191,7 +202,11 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 catch { alert("无法保存首次启动状态") }
             }
         }
-        if interpreter != nil {
+        startStatusTimer()
+    }
+
+    func startStatusTimer() {
+        if paths.appMode || interpreter != nil {
             timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() }
             RunLoop.main.add(timer!, forMode: .common)
         }
@@ -202,7 +217,12 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if paths.appMode && registerHost {
             _ = try paths.runNode([root.appendingPathComponent("native/install.cjs").path, "--app"])
         }
-        do { interpreter = try paths.controllerInterpreter() }
+        inspectRuntime()
+    }
+
+    func inspectRuntime() {
+        missingLabel = "本地模型未安装"
+        do { interpreter = paths.appMode && (installer.incomplete || modelJob == .install) ? nil : try paths.controllerInterpreter() }
         catch { interpreter = nil; missingLabel = "运行配置无效" }
     }
 
@@ -250,8 +270,14 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.1) { self.refresh() }
     }
 
-    func refresh() { run("status") }
+    func refresh() {
+        guard modelJob != .remove else { return }
+        inspectRuntime()
+        updateModelControls()
+        run("status")
+    }
     func run(_ action: String, then: ((String) -> Void)? = nil) {
+        if modelJob == .remove && ["start", "restart"].contains(action) { return }
         guard let python = interpreter else {
             stateItem.title = missingLabel
             state = "uninstalled"
@@ -337,7 +363,129 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(token, forType: .string)
         flash("已复制插件连接码", symbol: "checkmark.circle")
     }
+    func updateModelControls() {
+        let installed = interpreter != nil
+        for item in [startItem, stopItem, restartItem, copyItem] {
+            item?.isHidden = !installed || (paths.appMode && installer.removing)
+            if modelJob == .remove { item?.isEnabled = false }
+        }
+        copyItem?.isEnabled = installed && modelJob != .remove
+        guard paths.appMode else { return }
+        let enoughSpace = ((try? installer.capacity(paths.state)) ?? 0) >= ModelInstaller.minimumSpace
+        modelAction.isEnabled = true
+        if modelJob == .remove {
+            modelLabel.stringValue = "正在删除"
+            modelAction.title = "删除"; modelAction.isEnabled = false
+        } else if modelJob == .install {
+            modelLabel.stringValue = pausing ? "正在暂停" : installNotice ?? "准备中"
+            modelAction.title = "暂停"; modelAction.isEnabled = !pausing
+        } else if installer.removing {
+            modelLabel.stringValue = "删除未完成"; modelAction.title = "删除"
+        } else if installed {
+            modelLabel.stringValue = installNotice ?? "已安装"; modelAction.title = "删除"
+        } else {
+            modelLabel.stringValue = enoughSpace ? installNotice ?? (installer.incomplete ? "已暂停" : "未安装") : "磁盘空间不足"
+            modelAction.title = installer.incomplete ? "继续" : "下载（约 16 GB）"
+            modelAction.isEnabled = enoughSpace
+        }
+        let active = modelJob == .install || installer.incomplete
+        progressView?.isHidden = !active
+        if active {
+            let progress = installer.progress
+            modelProgress.isIndeterminate = progress == nil
+            if let p = progress {
+                modelProgress.maxValue = Double(p.total)
+                modelProgress.doubleValue = Double(p.downloaded)
+                let formatter = ByteCountFormatter()
+                byteLabel.stringValue = formatter.string(fromByteCount: p.downloaded) + " / " + formatter.string(fromByteCount: p.total)
+            } else { byteLabel.stringValue = "0 B / 待计算"; modelProgress.startAnimation(nil) }
+        }
+    }
+
+    @objc func modelActionClicked() {
+        if modelJob == .install { pauseInstall(); return }
+        guard modelJob == nil else { return }
+        if interpreter == nil && !installer.removing { beginInstall(); return }
+        let confirm = NSAlert()
+        confirm.messageText = "删除本地模型？"
+        confirm.addButton(withTitle: "取消")
+        confirm.addButton(withTitle: "删除")
+        if confirm.runModal() == .alertSecondButtonReturn { removeModel() }
+    }
+
+    func beginInstall() {
+        guard modelJob == nil, interpreter == nil else { return }
+        modelJob = .install; installNotice = "准备中"; pausing = false
+        installer.resume()
+        updateModelControls()
+        let engine = installer
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                try engine.install { stage in
+                    DispatchQueue.main.async { self.installNotice = stage; self.updateModelControls() }
+                }
+                DispatchQueue.main.async { self.finishModelJob(nil) }
+            } catch { DispatchQueue.main.async { self.finishModelJob((error as? InstallError)?.message ?? "安装文件写入失败 · 可继续") } }
+        }
+    }
+
+    func pauseInstall() {
+        guard modelJob == .install else { return }
+        pausing = true
+        installer.pause()
+        updateModelControls()
+    }
+
+    func removeModel() {
+        guard modelJob == nil, interpreter != nil || installer.removing else { return }
+        modelJob = .remove
+        updateModelControls()
+        func deleteFiles() {
+            let engine = installer
+            DispatchQueue.global(qos: .utility).async {
+                do {
+                    try engine.remove()
+                    DispatchQueue.main.async { self.finishModelJob(nil) }
+                } catch { DispatchQueue.main.async { self.finishModelJob("删除失败 · 可重试") } }
+            }
+        }
+        if interpreter == nil { deleteFiles(); return } // Resume a removal that already stopped the service.
+        run("stop") { result in
+            if result == "stopped" { deleteFiles() }
+            else { self.finishModelJob("模型未停止") }
+        }
+    }
+
+    func finishModelJob(_ notice: String?) {
+        modelJob = nil; pausing = false; installNotice = notice
+        refresh()
+        let reply = replyWhenIdle
+        replyWhenIdle = nil
+        reply?()
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        finishBeforeQuit { sender.reply(toApplicationShouldTerminate: true) }
+    }
+
+    func finishBeforeQuit(_ reply: @escaping () -> Void) -> NSApplication.TerminateReply {
+        guard modelJob != nil else { return .terminateNow }
+        replyWhenIdle = reply
+        pauseInstall()
+        return .terminateLater
+    }
+
     func makeSettingsGrid() -> NSGridView {
+        modelAction.target = self
+        modelAction.action = #selector(modelActionClicked)
+        modelAction.bezelStyle = .rounded
+        modelProgress.style = .bar
+        modelProgress.widthAnchor.constraint(equalToConstant: 124).isActive = true
+        byteLabel.font = .systemFont(ofSize: 11)
+        let progress = NSStackView(views: [modelProgress, byteLabel])
+        progress.orientation = .vertical
+        progressView = progress
+        updateModelControls()
         extensionLabel.stringValue = paths.extensionStatus
         let reveal = NSButton(title: "在访达中显示", target: self, action: #selector(revealExtension))
         let openChrome = NSButton(title: chromeURL == nil ? "未安装 Chrome" : "打开扩展页",
@@ -345,7 +493,7 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
         openChrome.isEnabled = chromeURL != nil
         let grid = NSGridView(views: [
             [NSTextField(labelWithString: "Chrome 扩展"), extensionLabel, reveal, openChrome],
-            [NSTextField(labelWithString: "本地模型"), NSTextField(labelWithString: interpreter == nil ? "未安装" : "已安装")],
+            [NSTextField(labelWithString: "本地模型"), modelLabel, progress, modelAction],
             [NSTextField(labelWithString: "本机 Codex"), codexLabel]
         ])
         grid.mergeCells(inHorizontalRange: NSRange(location: 1, length: 3), verticalRange: NSRange(location: 2, length: 1))
@@ -357,7 +505,7 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
     @objc func showSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 164),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 182),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "设置"
             window.isReleasedWhenClosed = false
@@ -375,6 +523,7 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
             settingsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                 guard let self else { return }
                 self.extensionLabel.stringValue = self.paths.extensionStatus
+                self.updateModelControls()
             }
         }
         if !detectingCodex {
@@ -397,6 +546,7 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
     func windowWillClose(_ notification: Notification) {
+        pauseInstall()
         settingsTimer?.invalidate()
         settingsTimer = nil
     }
