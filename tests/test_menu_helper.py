@@ -22,7 +22,7 @@ class MenuHelperPathTests(unittest.TestCase):
         main.write_text(source)
         cls.binary = cls.folder / 'helper-path-test'
         subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-module-cache-path',
-                        str(cls.folder / 'module-cache'), str(main), '-o', str(cls.binary)],
+                        str(cls.folder / 'module-cache'), str(main), str(ROOT / 'menu-helper/ModelInstaller.swift'), '-o', str(cls.binary)],
                        check=True, capture_output=True, text=True, timeout=90)
 
     def test_default_absolute_relative_and_tilde_state_paths(self):

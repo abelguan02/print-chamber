@@ -57,7 +57,7 @@ class BundleTests(unittest.TestCase):
         helper = self.app / 'Contents/MacOS/PrintChamberHelper'
         self.assertEqual(subprocess.check_output(['lipo', '-archs', helper], text=True).strip(), 'arm64')
         self.assertRegex(subprocess.check_output(['otool', '-l', helper], text=True), r'minos\s+13\.0\b')
-        for folder in ['extension', 'native']:
+        for folder in ['extension', 'native', 'installer']:
             self.assertEqual(files(self.resources / folder), files(ROOT / folder))
         for name in ['service.py', 'runtime_config.py', 'benchmark_local.py', 'demo.html', 'requirements-macos-arm64.txt',
                      'menu-helper/controller.py', 'menu-helper/AppIcon.icns', 'menu-helper/使用说明.txt']:

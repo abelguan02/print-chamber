@@ -74,7 +74,7 @@ def assemble(app, release):
             shutil.copyfile(ROOT / name, resources / name)
         shutil.copyfile(ROOT / 'menu-helper/controller.py', resources / 'controller.py')
         shutil.copyfile(ROOT / 'menu-helper/使用说明.txt', resources / '使用说明.txt')
-        for name in ['extension', 'native']:
+        for name in ['extension', 'native', 'installer']:
             shutil.copytree(ROOT / name, resources / name, ignore=shutil.ignore_patterns('.DS_Store', '__pycache__'))
         launcher = resources / 'print-chamber-host'
         shutil.copyfile(ROOT / 'menu-helper/print-chamber-host', launcher)
@@ -87,7 +87,7 @@ def assemble(app, release):
     (contents / 'Info.plist').write_bytes(plistlib.dumps(info))
     target = ['-target', 'arm64-apple-macos13'] if release else []
     subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-O', *target, '-module-cache-path',
-                    '/tmp/print-chamber-swift-cache', ROOT / 'menu-helper/main.swift',
+                    '/tmp/print-chamber-swift-cache', ROOT / 'menu-helper/main.swift', ROOT / 'menu-helper/ModelInstaller.swift',
                     '-o', contents / 'MacOS/PrintChamberHelper'], check=True)
     # Sign the outer app only. Never recursively re-sign the official Node executable.
     subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', app], check=True)

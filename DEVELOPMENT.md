@@ -56,6 +56,14 @@ python3 -B menu-helper/test_bundle.py -v
 
 构建后运行 `node --test tests/pairing-browser.cjs` 检查从搬移、登记到 Chrome 配对的完整路径，使用独立的临时 HOME、无窗口 Chromium 和模拟的本地健康检查。原生配对协议测试包含在 `npm test`。
 
+## 可选的本地模型
+
+发布版「设置」中的「下载（约 16 GB）」会安装本地模型。开始或继续前要求至少 20 GB 可用空间。准备环境时显示当前步骤，下载权重时显示已下载字节和总量。关闭设置窗口后安装在后台继续，重新打开即可看到当前进度。点「暂停」或退出 App 才会暂停，下次在设置中点「继续」。安装完成后在菜单中点「启动模型」。删除需要确认，App 会先停止自己管理的服务；正在打印或无法确认已停止时保留文件。
+
+Swift 负责引导全新账户安装：下载并验证官方 arm64 uv 0.13.9，用它安装 Python 3.12.14 和项目锁定的依赖，然后用新环境运行包内的 `installer/local_model.py`。该脚本使用 Hugging Face Hub 的匿名客户端，固定修订版 `e7b7dc27f91deacad38e78976d1f2b499d76a294`，下载 Diffusers 推理组件和 `LICENSE.md`。权重按清单中的 SHA-256 核验，普通 Git 文件按清单中的 Git 对象 ID 核验。校验失败时删除损坏文件，点「继续」会重新下载该文件。uv 缓存、解释器、阶段记录与未完成分片都位于 App 数据目录。安装提交后更新 `runtime.json`，保留其他设置。外部已配置的 Python 和模型可直接使用，删除操作只清理 App 数据目录内的安装文件及配置中的路径。
+
+安装器替身回归使用 `python3 -B tests/installer/test_local_model.py -v`。Hub HTTP 测试和下方 Python 契约测试都要用模型环境的 Python 运行。Hub HTTP 测试用该环境固定版本的 huggingface_hub 访问本地替身，验证续传和校验。发布版实机验收请使用干净的 macOS 标准账户。
+
 ## 开发依赖与测试
 
 Node.js 22+；`package-lock.json` 固定开发依赖。插件本身不携带 Node/Playwright。
@@ -64,6 +72,7 @@ Node.js 22+；`package-lock.json` 固定开发依赖。插件本身不携带 Nod
 npm ci
 npx playwright install chromium
 npm test
+.venv/bin/python -B tests/installer/test_hub_http.py -v
 PYTHONPATH=. .venv/bin/python -B -m unittest discover -s tests -p 'test_*.py'
 python3 -B menu-helper/test_controller.py
 npm run test:browser
