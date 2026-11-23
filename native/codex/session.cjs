@@ -1,4 +1,5 @@
 'use strict';
+const {version} = require('../../extension/manifest.json');
 const {collectImage} = require('./image.cjs');
 
 const SERVER_ARGS = [
@@ -11,7 +12,7 @@ const SERVER_ARGS = [
 ];
 
 async function initialize(client) {
-  await client.request('initialize',{clientInfo:{name:'print-chamber',title:'Print Chamber',version:'0.3.0'}});
+  await client.request('initialize',{clientInfo:{name:'print-chamber',title:'Print Chamber',version}});
   client.notify('initialized');
 }
 
