@@ -180,8 +180,12 @@ final class ModelInstaller {
         notify("下载模型")
         try step("snapshot") {
             try fm.createDirectory(at: staging, withIntermediateDirectories: true)
-            try run(python, [resources.appendingPathComponent("installer/local_model.py").path,
-                             staging.path, work.appendingPathComponent("progress.json").path], error: "模型下载中断 · 可继续")
+            do {
+                try run(python, [resources.appendingPathComponent("installer/local_model.py").path,
+                                 staging.path, work.appendingPathComponent("progress.json").path], error: "模型下载中断 · 可继续")
+            } catch let error as InstallError where error.exitCode == 65 {
+                throw InstallError("校验失败 · 可继续")
+            }
             guard fm.fileExists(atPath: staging.appendingPathComponent("LICENSE.md").path),
                   fm.fileExists(atPath: staging.appendingPathComponent("model_index.json").path)
             else { throw InstallError("模型文件不完整 · 可继续") }

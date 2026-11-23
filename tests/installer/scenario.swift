@@ -55,7 +55,17 @@ if scenario == "timer" {
         helper.updateModelControls()
         require(!helper.byteLabel.stringValue.isEmpty && helper.modelAction.title == "暂停", "missing progress")
         if scenario == "pause" { helper.modelActionClicked() }
-        else if scenario == "close" { helper.windowWillClose(Notification(name: NSWindow.willCloseNotification)) }
+        else if scenario == "close" {
+            helper.refreshOpenSettings()
+            let atClose = helper.modelProgress.doubleValue
+            helper.windowWillClose(Notification(name: NSWindow.willCloseNotification))
+            require(helper.settingsTimer == nil && !helper.pausing, "closing paused the download")
+            waitFor { Double(helper.installer.progress?.downloaded ?? 0) > atClose }
+            helper.refreshOpenSettings()
+            require(helper.modelProgress.doubleValue > atClose && helper.modelAction.title == "暂停",
+                    "reopened settings did not immediately show current progress")
+            helper.windowWillClose(Notification(name: NSWindow.willCloseNotification))
+        }
         else {
             var replied = false
             let answer = helper.finishBeforeQuit { replied = true }
@@ -64,7 +74,7 @@ if scenario == "timer" {
         }
     }
     waitFor { helper.modelJob == nil && !helper.pending }
-    if ["pause","close","quit","bad","network"].contains(scenario) {
+    if ["pause","quit","bad","network","checksum"].contains(scenario) {
         require(helper.interpreter == nil && helper.modelAction.title == "继续", "partial model exposed")
         print(helper.modelLabel.stringValue)
     } else {

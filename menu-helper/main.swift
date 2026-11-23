@@ -503,6 +503,18 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
         grid.translatesAutoresizingMaskIntoConstraints = false
         return grid
     }
+    func refreshOpenSettings() {
+        updateModelControls()
+        extensionLabel.stringValue = paths.extensionStatus
+        if settingsTimer == nil {
+            settingsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.extensionLabel.stringValue = self.paths.extensionStatus
+                self.updateModelControls()
+            }
+        }
+    }
+
     @objc func showSettings() {
         if settingsWindow == nil {
             let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 182),
@@ -518,14 +530,7 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.center()
             settingsWindow = window
         }
-        extensionLabel.stringValue = paths.extensionStatus
-        if settingsTimer == nil {
-            settingsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                guard let self else { return }
-                self.extensionLabel.stringValue = self.paths.extensionStatus
-                self.updateModelControls()
-            }
-        }
+        refreshOpenSettings()
         if !detectingCodex {
             detectingCodex = true
             let paths = self.paths
@@ -546,7 +551,6 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
         settingsWindow?.makeKeyAndOrderFront(nil)
     }
     func windowWillClose(_ notification: Notification) {
-        pauseInstall()
         settingsTimer?.invalidate()
         settingsTimer = nil
     }

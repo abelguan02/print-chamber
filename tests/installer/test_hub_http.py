@@ -9,18 +9,24 @@ import tempfile
 import threading
 import unittest
 
-from test_local_model import FILES, REV, ROOT
+from test_local_model import FILES, REV, ROOT, hub_metadata
 
 
 class HubHTTPTest(unittest.TestCase):
     def test_pinned_sdk_resumes_against_loopback_hub(self):
+        self.check_resumed_file(corrupt_prefix=False)
+
+    def test_checksum_covers_bytes_retained_before_resume(self):
+        self.check_resumed_file(corrupt_prefix=True)
+
+    def check_resumed_file(self, corrupt_prefix):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)
             data = home / 'state'
             partial = data / 'snapshot/transformer/weights.partial'
             partial.parent.mkdir(parents=True)
             offset = 32768
-            partial.write_bytes(FILES['transformer/weights'][:offset])
+            partial.write_bytes(b'x' * offset if corrupt_prefix else FILES['transformer/weights'][:offset])
             ranges = []
             repo = 'black-forest-labs/FLUX.2-klein-4B'
 
@@ -28,9 +34,7 @@ class HubHTTPTest(unittest.TestCase):
                 def do_GET(self):
                     start = 0
                     if self.path.split('?')[0] == f'/api/models/{repo}/revision/{REV}':
-                        body = json.dumps({'id': repo, 'sha': REV, 'siblings': [
-                            {'rfilename': key, 'size': len(value)} for key, value in FILES.items()
-                        ]}).encode()
+                        body = json.dumps({'id': repo, 'sha': REV, 'siblings': hub_metadata()}).encode()
                     elif self.path.startswith(f'/{repo}/resolve/{REV}/'):
                         key = self.path.split(f'/resolve/{REV}/')[1]
                         body = FILES[key]
@@ -55,12 +59,20 @@ class HubHTTPTest(unittest.TestCase):
                 try:
                     env = dict(os.environ, HOME=temp, HF_HOME=str(data / 'hf'),
                                HF_ENDPOINT=f'http://127.0.0.1:{server.server_port}', HF_HUB_DISABLE_IMPLICIT_TOKEN='1')
-                    subprocess.run([sys.executable, '-B', str(ROOT / 'installer/local_model.py'),
-                                    str(data / 'snapshot'), str(data / 'progress.json')], check=True, env=env, timeout=15)
+                    result = subprocess.run(
+                        [sys.executable, '-B', str(ROOT / 'installer/local_model.py'),
+                         str(data / 'snapshot'), str(data / 'progress.json')], env=env, timeout=15)
                 finally:
                     server.shutdown()
             self.assertEqual(ranges, [('transformer/weights', f'bytes={offset}-')])
-            self.assertEqual((data / 'snapshot/transformer/weights').read_bytes(), FILES['transformer/weights'])
+            self.assertFalse(partial.exists())
+            weights = data / 'snapshot/transformer/weights'
+            if corrupt_prefix:
+                self.assertEqual(result.returncode, 65)
+                self.assertFalse(weights.exists())
+                return
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(weights.read_bytes(), FILES['transformer/weights'])
             size = sum(map(len, FILES.values()))
             self.assertEqual(json.loads((data / 'progress.json').read_text()), {'downloaded': size, 'total': size})
 

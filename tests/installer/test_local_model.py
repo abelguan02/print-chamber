@@ -21,6 +21,18 @@ FILES = {name: (name.encode() * 9) for name in
          ['LICENSE.md', 'model_index.json', 'scheduler/cfg', 'text_encoder/cfg', 'tokenizer/cfg', 'vae/cfg']}
 FILES['transformer/weights'] = b'fake' * (4 * 1024 * 1024)
 
+def hub_metadata():
+    entries = []
+    for name, data in FILES.items():
+        entry = {'rfilename': name, 'size': len(data)}
+        if name == 'transformer/weights':
+            entry['lfs'] = {'sha256': hashlib.sha256(data).hexdigest(), 'size': len(data), 'pointerSize': 132}
+        else:
+            entry['blobId'] = hashlib.sha1(f'blob {len(data)}\0'.encode() + data).hexdigest()
+        entries.append(entry)
+    return entries
+
+
 # Only the Hub HTTP transport and metadata object are substituted. The production
 # Python worker selects files, checks ranges, streams, checkpoints and publishes.
 HUB = """
@@ -34,7 +46,10 @@ class HfApi:
     def model_info(self, repo, revision, files_metadata, token):
         assert files_metadata and token is False
         with urlopen(BASE + '/metadata') as r: result = json.load(r)
-        return SimpleNamespace(sha=result['sha'], siblings=[SimpleNamespace(**x) for x in result['siblings']])
+        siblings = [SimpleNamespace(rfilename=x['rfilename'], size=x['size'], blob_id=x.get('blobId'),
+                                   lfs=SimpleNamespace(**x['lfs']) if 'lfs' in x else None)
+                    for x in result['siblings']]
+        return SimpleNamespace(sha=result['sha'], siblings=siblings)
 """
 TRANSPORT = """
 from contextlib import contextmanager
@@ -83,6 +98,7 @@ class InstallerTests(unittest.TestCase):
         self.config.write_text(json.dumps({'samples':'keep'}))
         self.calls = []
         self.fail = False
+        self.corrupt = None
         owner = self
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
@@ -92,9 +108,13 @@ class InstallerTests(unittest.TestCase):
                 if resource == '/uv': data = owner.archive
                 elif resource in ['/python','/deps']: data = b'fixture'
                 elif resource == '/metadata':
-                    data = json.dumps({'sha':REV,'siblings':[{'rfilename':p,'size':len(v)} for p,v in FILES.items()]
+                    data = json.dumps({'sha':REV,'siblings':hub_metadata()
                                         + [{'rfilename':'duplicate.safetensors','size':999}]}).encode()
-                elif resource.startswith('/'+REV+'/'): data = FILES[resource[len(REV)+2:]]
+                elif resource.startswith('/'+REV+'/'):
+                    name = resource[len(REV)+2:]
+                    data = FILES[name]
+                    if name == owner.corrupt:
+                        data = data[:-1] + bytes([data[-1] ^ 1])
                 else: self.send_error(404); return
                 if owner.fail and resource.endswith('/weights'):
                     self.send_error(503); return
@@ -179,17 +199,54 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(Path(config['python']).is_file())
         for file in ['/uv','/python','/deps','/'+REV+'/LICENSE.md']: self.assertEqual(self.calls.count((file,0)),1)
 
-    def test_close_and_quit_resume_partial_file_after_relaunch(self):
-        for action in ['pause','close','quit']:
+    def test_close_keeps_downloading_and_reopen_shows_current_progress(self):
+        self.scenario('close')
+        self.assertEqual([n for path, n in self.calls if path.endswith('/weights')], [0])
+        self.assertIn('model', json.loads(self.config.read_text()))
+
+    def test_pause_and_quit_resume_partial_file_after_relaunch(self):
+        for action in ['pause','quit']:
             self.assertIn('已暂停',self.scenario(action))
             self.assertTrue((self.state/'model-installer/pending').exists())
         self.scenario('resume')
         offsets=[n for p,n in self.calls if p.endswith('/weights')]
-        self.assertEqual(len(offsets),4)
+        self.assertEqual(len(offsets),3)
         self.assertEqual(offsets[0],0)
         self.assertGreater(offsets[1],0)
         self.assertTrue(all(b > a for a,b in zip(offsets, offsets[1:])))
         self.assertEqual((self.state/'models/FLUX.2-klein-4B/transformer/weights').read_bytes(),FILES['transformer/weights'])
+
+    def test_same_size_bad_weight_removed_then_only_that_file_retried(self):
+        name = 'transformer/weights'
+        self.corrupt = name
+        self.assertIn('校验失败 · 可继续', self.scenario('checksum'))
+        snapshot = self.state / 'model-installer/snapshot'
+        self.assertFalse((snapshot / name).exists())
+        self.assertFalse((snapshot / (name + '.partial')).exists())
+        self.assertTrue((snapshot / 'model_index.json').is_file())
+        progress = json.loads((snapshot.parent / 'progress.json').read_text())
+        self.assertEqual(progress['downloaded'], progress['total'] - len(FILES[name]))
+        self.assertEqual(json.loads(self.config.read_text()), {'samples': 'keep'})
+
+        self.corrupt = None
+        self.calls.clear()
+        self.scenario('resume')
+        self.assertEqual(self.calls, [('/metadata', 0), (f'/{REV}/{name}', 0)])
+        self.assertEqual((self.state / 'models/FLUX.2-klein-4B' / name).read_bytes(), FILES[name])
+
+    def test_preexisting_same_size_git_file_checked_before_reuse(self):
+        self.fail = True
+        self.scenario('network')
+        self.fail = False
+        name = 'model_index.json'
+        staged = self.state / 'model-installer/snapshot' / name
+        staged.write_bytes(b'x' * len(FILES[name]))
+        self.calls.clear()
+        self.assertIn('校验失败 · 可继续', self.scenario('checksum'))
+        self.assertFalse(staged.exists())
+        self.assertEqual(self.calls, [('/metadata', 0)])
+        self.scenario('resume')
+        self.assertEqual((self.state / 'models/FLUX.2-klein-4B' / name).read_bytes(), FILES[name])
 
     def test_immediate_menu_install_and_delete_in_one_process(self):
         self.scenario('roundtrip')
