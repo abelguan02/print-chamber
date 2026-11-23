@@ -19,3 +19,4 @@
 | 02 Codex 出图可行性验证 | `02-codex-imagegen-feasibility.md` | 已完成（1/5 张实测） |
 | 03 修正本机 Codex 接入（PR #6） | `03-codex-integration-fixes.md` | 已完成（PR #6） |
 | 04 GitHub 安装包与自动配对（4 个阶段） | `04-installer.md` | 已完成（PR #9–#12），待测试账户验收与发布 |
+| 05 全项目审核修复（9 项） | `05-review-fixes.md` | 待开发 |
