@@ -62,6 +62,29 @@ struct RuntimePaths {
         return python  // Preserve the venv executable path, including its symlink.
     }
 
+    func runNode(_ arguments: [String]) throws -> Data {
+        let process = Process(), output = Pipe()
+        process.executableURL = root.appendingPathComponent("node/bin/node")
+        process.arguments = arguments
+        process.environment = childEnvironment
+        process.standardOutput = output
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { throw CocoaError(.executableRuntimeMismatch) }
+        return data
+    }
+
+    var extensionStatus: String {
+        struct Seen: Decodable { let version: String }
+        let file = state.appendingPathComponent("extension-seen.json")
+        guard FileManager.default.fileExists(atPath: file.path) else { return "未加载" }
+        do {
+            let seen = try JSONDecoder().decode(Seen.self, from: Data(contentsOf: file))
+            return "已连接 · v" + seen.version
+        } catch { return "配对记录无效" }
+    }
+
     func prepare() throws {
         guard appMode else { return }
         let fm = FileManager.default
@@ -118,7 +141,7 @@ final class AboutWindow: NSWindow {
     }
 }
 
-final class Helper: NSObject, NSApplicationDelegate {
+final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var statusItem: NSStatusItem!
     let stateItem = NSMenuItem(title: "正在检查…", action: nil, keyEquivalent: "")
     var startItem: NSMenuItem!
@@ -135,6 +158,11 @@ final class Helper: NSObject, NSApplicationDelegate {
     var interpreter: URL?
     var missingLabel = "本地模型未安装"
     var settingsWindow: NSWindow?
+    var settingsTimer: Timer?
+    let extensionLabel = NSTextField(labelWithString: "未加载")
+    let codexLabel = NSTextField(labelWithString: "检测中…")
+    var detectingCodex = false
+    let chromeURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome")
     var copyItem: NSMenuItem!
     var controllerStarts = 0
     let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知"
@@ -149,20 +177,31 @@ final class Helper: NSObject, NSApplicationDelegate {
             .contains(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }) {
             NSApp.terminate(nil); return
         }
-        do { try prepareRuntime() }
+        do { try prepareRuntime(registerHost: true) }
         catch { alert("初始化失败 · " + error.localizedDescription); NSApp.terminate(nil); return }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         setIcon("printer", "Print Chamber")
         statusItem.menu = makeMenu()
         refresh()
+        if paths.appMode {
+            let firstLaunch = paths.state.appendingPathComponent("settings-opened")
+            if !FileManager.default.fileExists(atPath: firstLaunch.path) {
+                showSettings()
+                do { try Data().write(to: firstLaunch, options: .atomic) }
+                catch { alert("无法保存首次启动状态") }
+            }
+        }
         if interpreter != nil {
             timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() }
             RunLoop.main.add(timer!, forMode: .common)
         }
     }
 
-    func prepareRuntime() throws {
+    func prepareRuntime(registerHost: Bool) throws {
         try paths.prepare()
+        if paths.appMode && registerHost {
+            _ = try paths.runNode([root.appendingPathComponent("native/install.cjs").path, "--app"])
+        }
         do { interpreter = try paths.controllerInterpreter() }
         catch { interpreter = nil; missingLabel = "运行配置无效" }
     }
@@ -298,17 +337,78 @@ final class Helper: NSObject, NSApplicationDelegate {
         NSPasteboard.general.clearContents(); NSPasteboard.general.setString(token, forType: .string)
         flash("已复制插件连接码", symbol: "checkmark.circle")
     }
+    func makeSettingsGrid() -> NSGridView {
+        extensionLabel.stringValue = paths.extensionStatus
+        let reveal = NSButton(title: "在访达中显示", target: self, action: #selector(revealExtension))
+        let openChrome = NSButton(title: chromeURL == nil ? "未安装 Chrome" : "打开扩展页",
+                                  target: self, action: #selector(openExtensions))
+        openChrome.isEnabled = chromeURL != nil
+        let grid = NSGridView(views: [
+            [NSTextField(labelWithString: "Chrome 扩展"), extensionLabel, reveal, openChrome],
+            [NSTextField(labelWithString: "本地模型"), NSTextField(labelWithString: interpreter == nil ? "未安装" : "已安装")],
+            [NSTextField(labelWithString: "本机 Codex"), codexLabel]
+        ])
+        grid.mergeCells(inHorizontalRange: NSRange(location: 1, length: 3), verticalRange: NSRange(location: 2, length: 1))
+        grid.rowSpacing = 14
+        grid.columnSpacing = 12
+        grid.rowAlignment = .firstBaseline
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        return grid
+    }
     @objc func showSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 220),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 164),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "设置"
             window.isReleasedWhenClosed = false
+            window.delegate = self
+            let grid = makeSettingsGrid()
+            let content = window.contentView!
+            content.addSubview(grid)
+            NSLayoutConstraint.activate([grid.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+                                         grid.centerYAnchor.constraint(equalTo: content.centerYAnchor)])
             window.center()
             settingsWindow = window
         }
+        extensionLabel.stringValue = paths.extensionStatus
+        if settingsTimer == nil {
+            settingsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                guard let self else { return }
+                self.extensionLabel.stringValue = self.paths.extensionStatus
+            }
+        }
+        if !detectingCodex {
+            detectingCodex = true
+            let paths = self.paths
+            DispatchQueue.global(qos: .utility).async {
+                struct Detection: Decodable { let found: Bool; let source: String?; let version: String? }
+                let label: String
+                do {
+                    let data = try paths.runNode([paths.root.appendingPathComponent("native/detect.cjs").path])
+                    let result = try JSONDecoder().decode(Detection.self, from: data)
+                    if result.found, let version = result.version?.split(separator: " ").last {
+                        label = "已检测到 · " + (result.source == "standalone" ? "独立版 " : "桌面版 ") + version
+                    } else { label = "未检测到" }
+                } catch { label = "检测失败" }
+                DispatchQueue.main.async { self.codexLabel.stringValue = label; self.detectingCodex = false }
+            }
+        }
         NSApp.activate(ignoringOtherApps: true)
         settingsWindow?.makeKeyAndOrderFront(nil)
+    }
+    func windowWillClose(_ notification: Notification) {
+        settingsTimer?.invalidate()
+        settingsTimer = nil
+    }
+    @objc func revealExtension() {
+        NSWorkspace.shared.activateFileViewerSelecting([paths.state.appendingPathComponent("extension")])
+    }
+    @objc func openExtensions() {
+        guard let chrome = chromeURL else { return }
+        NSWorkspace.shared.open([URL(string: "chrome://extensions")!], withApplicationAt: chrome,
+                                configuration: NSWorkspace.OpenConfiguration()) { _, error in
+            if error != nil { DispatchQueue.main.async { self.alert("无法打开 Chrome 扩展页") } }
+        }
     }
     @objc func openHelp() { NSWorkspace.shared.open(paths.help) }
     @objc func openLog() {
@@ -450,17 +550,32 @@ final class Helper: NSObject, NSApplicationDelegate {
 if CommandLine.arguments.contains("--self-test") {
     do {
         let helper = Helper()
-        try helper.prepareRuntime()
+        let register = CommandLine.arguments.contains("--test-registration")
+        if register {
+            let fixtureHome = ProcessInfo.processInfo.environment["HOME"].map { URL(fileURLWithPath: $0).standardizedFileURL.resolvingSymlinksInPath().path }
+            guard let fixtureHome, fixtureHome.hasPrefix(FileManager.default.temporaryDirectory.resolvingSymlinksInPath().path + "/")
+                || fixtureHome.hasPrefix("/private/tmp/") else { throw CocoaError(.fileWriteNoPermission) }
+        }
+        try helper.prepareRuntime(registerHost: register)
         let menu = helper.makeMenu()
         helper.refresh()
         while helper.pending { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
-        let report: [String: Any] = [
+        var report: [String: Any] = [
             "mode": helper.paths.appMode ? "app" : "dev", "resources": helper.root.path,
             "state": helper.paths.state.path, "controller": helper.paths.controller.path,
             "python": helper.interpreter?.path as Any, "help": helper.paths.help.path,
             "menu": menu.items.filter { !$0.isHidden && !$0.isSeparatorItem }.map { $0.title },
-            "controllerStarts": helper.controllerStarts
+            "extensionStatus": helper.paths.extensionStatus, "controllerStarts": helper.controllerStarts
         ]
+        if helper.paths.appMode {
+            let grid = helper.makeSettingsGrid()
+            report["settingsRows"] = (0..<grid.numberOfRows).map { row in
+                (0..<grid.numberOfColumns).compactMap { col in
+                    let view = grid.cell(atColumnIndex: col, rowIndex: row).contentView
+                    return (view as? NSTextField)?.stringValue ?? (view as? NSButton)?.title
+                }
+            }
+        }
         print(String(decoding: try JSONSerialization.data(withJSONObject: report), as: UTF8.self))
         exit(0)
     } catch { fputs("Startup self-test failed: \(error)\n", stderr); exit(1) }

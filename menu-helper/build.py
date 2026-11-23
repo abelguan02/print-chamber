@@ -76,6 +76,11 @@ def assemble(app, release):
         shutil.copyfile(ROOT / 'menu-helper/使用说明.txt', resources / '使用说明.txt')
         for name in ['extension', 'native']:
             shutil.copytree(ROOT / name, resources / name, ignore=shutil.ignore_patterns('.DS_Store', '__pycache__'))
+        launcher = resources / 'print-chamber-host'
+        shutil.copyfile(ROOT / 'menu-helper/print-chamber-host', launcher)
+        launcher.chmod(0o755)
+        # Shell scripts are sealed as resources. Chrome uses the stable entry in MacOS.
+        (contents / 'MacOS/print-chamber-host').symlink_to('../Resources/print-chamber-host')
         copy_node(resources)
     else:
         info['ProjectRoot'] = str(ROOT)

@@ -24,6 +24,10 @@ function codexRequest(request) {
         if(size>22000000)return finish(null,'Codex 返回的图片过大');
         chunks.push(msg.chunk);return;
       }
+      if(request.type==='hello' && typeof msg.done?.appVersion === 'string' &&
+          /^\d{1,5}(?:\.\d{1,5}){0,3}$/.test(msg.done.extensionVersion))return finish(msg.done);
+      if(request.type==='local-token' && (msg.done?.token===null ||
+          (typeof msg.done?.token==='string' && /^[^\r\n]{1,1024}$/.test(msg.done.token))))return finish(msg.done);
       if(request.type==='detect' && typeof msg.done?.found==='boolean')return finish(msg.done);
       if(request.type==='connect'&&msg.done?.connected===true)return finish(msg.done);
       if(request.type==='generate'&&msg.done&&size)return finish({...msg.done,image:chunks.join('')});

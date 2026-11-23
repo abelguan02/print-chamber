@@ -40,7 +40,8 @@ class BundleTests(unittest.TestCase):
         self.state = Path(temp.name) / 'test state'
 
     def launch(self, app=None, **overrides):
-        env = {'PATH': '/usr/bin:/bin', 'PRINT_CHAMBER_STATE': str(self.state), **overrides}
+        env = {'PATH': '/usr/bin:/bin', 'HOME': str(self.state.parent / 'home'),
+               'PRINT_CHAMBER_STATE': str(self.state), **overrides}
         executable = (app or self.app) / 'Contents/MacOS/PrintChamberHelper'
         output = subprocess.check_output([executable, '--self-test'], cwd=self.folder,
                                          env=env, text=True, timeout=15)

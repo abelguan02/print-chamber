@@ -12,7 +12,7 @@ test('Local setup: first use, state checks, shared token persistence and cloud m
   const popup=await context.newPage();const errors=[];popup.on('pageerror',e=>errors.push(e.message));
   await popup.goto(base+'/popup.html');
   await popup.waitForFunction(()=>document.querySelector('a[href="settings.html"]').hidden);
-  assert.equal(await popup.locator('#token').isVisible(),false);
+  await popup.locator('#token').waitFor();
   assert.equal(await popup.locator('#save').innerText(),'打开生成设置');
   assert.equal(healthRequests,0,'First use must not attempt a local connection');
   const [page]=await Promise.all([context.waitForEvent('page'),popup.click('#save')]);
