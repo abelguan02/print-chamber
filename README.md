@@ -46,8 +46,11 @@
 | `design-reference/`、`build-design.cjs` | 已采用设计来源与编译工具 |
 | `extension/icons/`、`build-icons.cjs` | 扩展与小助手共用的统一图标及生成工具 |
 | `tests/`、根目录测试脚本 | 自动回归与验证工具 |
-| `baselines/`、`BASELINE.txt` | 不可覆盖的历史归档与采用决定 |
-| `work/` | 开发交接、检查记录与独立实验脚本 |
+| `baselines/`、`BASELINE.txt` | 当前基线说明与不可覆盖的历史归档 |
+| `specs/` | 开发任务单与进度 |
+| `docs/decisions.md` | 关键决定记录 |
+| `docs/archive/` | 过期的说明与验收记录，仅供追溯 |
+| `work/` | 审查记录与独立实验脚本 |
 
 仓库不包含模型权重、本机 Python/Node 依赖、`.local/` 连接码和配置、日志、生成的 App、`output/` 图片与对照页，以及已排除的其他聊天实验。部分历史记录引用这些仅在原机器保留的文件；克隆仓库后不会自动拥有对应素材和实验产物。
 
