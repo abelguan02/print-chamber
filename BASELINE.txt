@@ -1,40 +1,19 @@
-当前生效提示词（2026-10-26 明确授权）
-用户要求“将 G3 替换当前默认 D 并接入使用路径”。本地 benchmark_local.py 与 extension/cloud-prompt.js 已采用 output/scenes-g3-20261025-060950/prompt.txt 的逐字原文。
-旧服务返回的提示词指纹不符或缺失时，扩展拒绝显示及保存该结果。启用更新需重启本地模型、重新加载扩展并刷新作品页；历史打印保留。
-G4 不采用，秋色森林配色漂移仍为已知限制。真实 ArtStation 作品页与云端生成效果尚未验证。
+当前基线：Print Chamber 0.4.0
+用户确认日期：2026-11-24
+对应提交：a5378f5（main，安装包阶段 D 完成后）
 
-历史提示词变更（2026-10-07）
-用户要求“默认提示词改成我给你的版本”：benchmark_local.py 的 PROMPT 已替换为用户原文 D。
-对照来源：output/eight-ab-20261007-174824/metrics.json 的 prompts.B（展示标为 D）。
-旧提示词与 0.1.1 归档继续保留，以下内容为历史基线记录，不再约束当前默认提示词。
-插件临时缓存需通过重新加载插件及刷新作品页更新；历史打印记录保留。
-
-历史基线
-用户确认日期：2026-10-07
-
-插件方向基线确认
-用户已确认本聊天的 Print Chamber 0.1.1 作为后续方向。
-快照位置：baselines/print-chamber-0.1.1-20261007/
-文件范围、SHA-256 与排除项见快照的 manifest.json 和 基线说明.txt。
-不合并其他聊天实验。design-preview/、start-design-preview.command 不属于本基线。
-真实 ArtStation 作品页尚未验证通过；采用方向不等于该问题已验收。
-
-决定
-保留旧版作为基线，不采用 prompt-fidelity-v2.txt 或 prompt-fidelity-v3.txt。这两轮结果仅留作失败实验记录，不作为默认提示词或默认预览。
-
-统一提示词基线
-benchmark_local.py 中的默认 PROMPT。
-第 1 张：output/local-20261007-112425/preview-464x736-1.jpg
-第 2 张：output/local-20261007-112439/preview-768x432-1.jpg
-第 4 张：output/local-20261007-112451/preview-512x640-1.jpg
-第 5 张：output/local-20261007-112502/preview-768x432-1.jpg
-
-另行保留的第 3 张已认可参考
-output/local-20261007-111710/preview-432x768-2.jpg
-该图使用 prompt-preserve.txt 的角色专用提示词，不属于统一提示词验证结果。
+包含
+- 当前界面与功能：打印机浮层、托盘、打印记录、批量操作、生成设置。
+- 三种生成方式：本地 FLUX.2 klein 4B、本机 Codex、云端 API。
+- 默认提示词 G3：benchmark_local.py 与 extension/cloud-prompt.js 中的逐字原文，权威来源为 output/scenes-g3-20261025-060950/prompt.txt。
+- macOS 菜单栏 App 与 dmg 安装包。
 
 已知限制
-保留基线不表示所有图片质量通过。第 1 张偏暗，第 2 张表情改变，第 5 张面罩缺失等问题仍存在。新提示词虽改变局部问题，却损伤其他设计与氛围，不能视为整体改善。
+- 秋色森林等场景存在配色漂移。
+- 真实 ArtStation 作品页、其他真实网站及云端生成效果尚未验收。
+- 安装包尚未在干净的测试账户上完成首次启动验收。
 
-工作边界
-用户后续已授权开发插件。沿用上述旧版提示词；不自动继续提示词迭代。
+历史归档
+- baselines/print-chamber-0.1.1-20261007/：0.1.1 快照，不可修改。
+- Git 标签 baseline-1.0-candidate-20261008：代码审查前的候选快照。
+- 历次决定见 docs/decisions.md。

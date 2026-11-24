@@ -1,27 +1,23 @@
-# Confirmed project baseline
+# 项目规则
 
-Latest authorized prompt change (2026-10-26): the user explicitly authorized replacing active D with G3 and connecting it to the current generation paths. `benchmark_local.py` and `extension/cloud-prompt.js` now use the exact text from `output/scenes-g3-20261025-060950/prompt.txt`. This supersedes the D-default instructions below. G4 remains rejected; the old archive remains immutable. Autumn forest color drift remains a known limitation; no further prompt iteration is authorized.
+用户在对话中的明确指示优先于本文件。
 
-The user confirmed this chat's Print Chamber 0.1.1 implementation as the future direction on 2026-10-07.
-Read BASELINE.txt and baselines/print-chamber-0.1.1-20261007/manifest.json before changing implementation files.
+## 当前状态
+- 基线：0.4.0，用户于 2026-11-24 确认（提交 `a5378f5`）。详见 `BASELINE.txt`。
+- 默认提示词：G3，原文在 `benchmark_local.py` 与 `extension/cloud-prompt.js`，两处须逐字一致。
+- 任务进度：`specs/README.md`。关键决定：`docs/decisions.md`。`docs/archive/` 只是历史，不作为依据。
 
-- Treat baselines/print-chamber-0.1.1-20261007 as an archival snapshot. Do not edit or regenerate it in place. Create a new explicitly named version for subsequent accepted baselines.
-- Do not merge experiments from other chats into the active extension, service, prompt, or baseline without explicit user authorization to adopt those experiments.
-- Keep other-chat experiments in separate directories or worktrees. In particular, design-preview/ and start-design-preview.command are outside this baseline and must not replace its implementation.
-- Current default: on 2026-10-07, after the D comparison, the user explicitly authorized replacing benchmark_local.py PROMPT with their exact D text (output/eight-ab-20261007-174824/metrics.json, prompts.B). This supersedes earlier instructions to retain the old generic prompt in active code. Preserve the old archival snapshot. Rejected v2/v3 and experimental B/C prompts remain excluded.
-- Before authorized changes, compare the current files with the snapshot manifest. Preserve unexplained concurrent changes; do not silently overwrite them.
-- Preserve the test limitation: live ArtStation artwork pages have not been verified; simulated cards and the local gallery passed. Do not label the live-site issue resolved without new evidence.
+## 不能做的事
+- 不修改 G3 提示词文本，不继续迭代提示词（G4 及更早的 V2、V3、B、C 均已否决）。
+- 不修改 `baselines/` 下的归档。新的基线另建目录或用 Git 标签记录。
+- 不读取、复制或记录用户凭据：API Key、连接码、`~/.codex/auth.json`。
+- 不把其他对话的实验合并进正式代码，除非用户明确授权。实验放在 `experiments/` 或独立工作树；`extension/`、`native/` 不得引用 `experiments/`。
+- 不把真实 ArtStation 作品页、真实云端生成效果标记为已验证，除非有新的实测证据。
+- 不在未经用户确认的情况下调用付费接口或消耗 Codex 额度。
 
-Explicit later user instructions take precedence over these baseline rules.
-
-## Authorized visual replacement (0.2.0 work in progress)
-
-On 2026-10-07 the user explicitly requested exact reproduction of
-`/Users/abelguan/Downloads/Print Chamber 设计稿.html` across the extension UI.
-The source is preserved in `design-reference/original.html`; extracted templates
-and bundled fonts are the only design source for this change. `build-design.cjs`
-compiles the printer markup, popup and gallery from those templates.
-The old 0.1.1 snapshot remains immutable. This new working version is not a newly
-accepted baseline until the user confirms it. The later authorized D prompt
-replacement above is independent of UI baseline acceptance. Do not import
-`design-preview/` or other-chat experiments.
+## 工作方式
+- 在新分支开发，不直接提交到 `main`。
+- 发现无法解释的现有改动时保留它，不要静默覆盖。
+- 交付时贴出测试命令与结果；未验证的项写明未验证；写清楚用户要怎么让更新生效。
+- 界面只写标题、按钮、状态和出错原因，不写说明段落。
+- 规则文件只写当前生效的内容；历史放进 `docs/decisions.md`。
