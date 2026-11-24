@@ -51,6 +51,12 @@ final class ModelInstaller {
         return try? JSONDecoder().decode(ModelProgress.self, from: data)
     }
 
+    var requiredSpace: Int64 {
+        guard incomplete, let p = progress, p.downloaded >= 0, p.total > 0, p.total <= Int64.max - 2_000_000_000
+        else { return Self.minimumSpace }
+        return max(0, p.total - p.downloaded) + 2_000_000_000
+    }
+
     func resume() { lock.lock(); paused = false; lock.unlock() }
     func pause() {
         lock.lock(); defer { lock.unlock() }
@@ -119,7 +125,7 @@ final class ModelInstaller {
     func install(notify: (String) -> Void) throws {
         guard !removing else { throw InstallError("删除未完成") }
         _ = try config() // Fail before writing into a damaged configuration.
-        guard try capacity(state) >= Self.minimumSpace else { throw InstallError("磁盘空间不足") }
+        guard try capacity(state) >= requiredSpace else { throw InstallError("磁盘空间不足") }
         for url in [work, state.appendingPathComponent("python"), state.appendingPathComponent("models")] {
             if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true {
                 throw InstallError("安装目录为符号链接")
@@ -130,6 +136,8 @@ final class ModelInstaller {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         }
         if !incomplete {
+            let previousProgress = work.appendingPathComponent("progress.json")
+            if fm.fileExists(atPath: previousProgress.path) { try fm.removeItem(at: previousProgress) }
             // Completion markers apply only to one install, even if its runtime was later removed.
             for name in ["uv", "python", "venv", "dependencies", "snapshot"] {
                 let done = work.appendingPathComponent(name + ".done")

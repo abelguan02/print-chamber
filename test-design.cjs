@@ -6,6 +6,7 @@ const fs=require('fs');const assert=require('node:assert/strict');
  try{
  const worker=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker');const id=new URL(worker.url()).host;
   await require('./tests/browser-options.cjs').mockAbsentCodex(worker);
+ await context.route('http://127.0.0.1:8877/health',route=>route.fulfill({json:{ready:true,failed:false,busy:false}}));
  const result='data:image/png;base64,'+fs.readFileSync(require('./tests/browser-options.cjs').fixture).toString('base64');
  await worker.evaluate(async image=>{
   await chrome.storage.local.clear();await chrome.storage.local.set({token:'test',enabled:true});
@@ -57,7 +58,7 @@ const fs=require('fs');const assert=require('node:assert/strict');
    await worker.evaluate(async()=>{const {history}=await chrome.storage.local.get('history');await chrome.storage.local.set({history:[{...history[0],id:'second-record',sourceUrl:'https://cdna.artstation.com/second.jpg',title:'Second print'},...history]})});
    const gallery=await context.newPage();await gallery.goto(`chrome-extension://${id}/gallery.html`);
    await gallery.locator('#records article').nth(1).waitFor();
-   const popup=await context.newPage();await popup.route('http://127.0.0.1:8877/health',r=>r.fulfill({contentType:'application/json',body:'{"ready":true}'}));await popup.goto(`chrome-extension://${id}/popup.html`);
+   const popup=await context.newPage();await popup.goto(`chrome-extension://${id}/popup.html`);
    await popup.locator('#recent a').nth(1).waitFor();
    await page.bringToFront();await page.locator('print-chamber-tray .tray-photo').hover();
    await page.screenshot({path:'output/tray-delete.png'});
@@ -100,8 +101,8 @@ const fs=require('fs');const assert=require('node:assert/strict');
  await settings.locator('#save-settings').click();
  await settings.waitForFunction(()=>!document.querySelector('#fields').disabled);
  assert.equal(await settings.locator('#notice').innerText(),'已保存');
- await popup.route('http://127.0.0.1:8877/health',r=>r.fulfill({contentType:'application/json',body:'{"ready":true}'}));await popup.reload();await popup.locator('#dashboard').waitFor();await popup.screenshot({path:'output/new-dashboard.png'});assert.equal(await popup.locator('#recent a').count(),2);await popup.locator('[data-trigger=alt]').click();assert.equal(await worker.evaluate(async()=>(await chrome.storage.local.get('trigger')).trigger),'alt');
- const gallery=await context.newPage();gallery.on('pageerror',e=>errors.push(e.message));await gallery.route('http://127.0.0.1:8877/health',r=>r.fulfill({contentType:'application/json',body:'{"ready":true}'}));await gallery.goto(`chrome-extension://${id}/gallery.html`);await gallery.locator('#records article').first().waitFor();await gallery.screenshot({path:'output/new-gallery.png',fullPage:true});assert.equal(await gallery.locator('#records article').count(),2);await gallery.locator('[data-filter=Behance]').click();assert.equal(await gallery.locator('#records article').count(),0);await gallery.locator('[data-filter=all]').click();await gallery.locator('.picture').first().click();assert(await gallery.locator('#detail').isVisible());await gallery.keyboard.press('Escape');
+ await popup.reload();await popup.locator('#dashboard').waitFor();await popup.screenshot({path:'output/new-dashboard.png'});assert.equal(await popup.locator('#recent a').count(),2);await popup.locator('[data-trigger=alt]').click();assert.equal(await worker.evaluate(async()=>(await chrome.storage.local.get('trigger')).trigger),'alt');
+ const gallery=await context.newPage();gallery.on('pageerror',e=>errors.push(e.message));await gallery.goto(`chrome-extension://${id}/gallery.html`);await gallery.locator('#records article').first().waitFor();await gallery.screenshot({path:'output/new-gallery.png',fullPage:true});assert.equal(await gallery.locator('#records article').count(),2);await gallery.locator('[data-filter=Behance]').click();assert.equal(await gallery.locator('#records article').count(),0);await gallery.locator('[data-filter=all]').click();await gallery.locator('.picture').first().click();assert(await gallery.locator('#detail').isVisible());await gallery.keyboard.press('Escape');
  // Visual fixture uses the exact gradient placeholder from the supplied printer board.
  await gallery.evaluate(()=>{const p=document.querySelector('#hero-printer');document.body.replaceChildren(p);document.body.style.background='white';p.className='panel ready';p.style.visibility='visible';p.querySelector('.result').style.display='none';p.querySelector('.print-sheet').style.background='radial-gradient(ellipse at 38% 28%, #FFE6EE 0%, #F0B8C9 18%, #C2507F 52%, #4A1D38 100%)';p.querySelector('.caption').textContent='本地打印 · 3.8 秒 · 来自 @[作者名]'});
  await gallery.evaluate(()=>document.fonts.ready);await gallery.locator('.panel').screenshot({path:'output/new-reference-comparison.png'});

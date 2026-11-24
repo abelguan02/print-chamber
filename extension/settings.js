@@ -63,7 +63,9 @@ async function acknowledgeCloudCharge() {
 
 async function save() {
   const mode = $('#mode').value;
-  if (mode === 'local') await LocalSettings.save();
+  if (mode === 'local' && !await LocalSettings.save()) {
+    throw Error('请先填写本地连接码');
+  }
   saved = await send({type: 'cloud-save', config: {
     mode,
     provider: $('#provider').value,
@@ -174,24 +176,49 @@ $('#trial').onclick = () => action(async () => {
   $('#preview').hidden = false;
   $('#download').href = result.image;
   $('#download').hidden = false;
-  saved = await send({type: 'cloud-load'});
-  providerFields();
-  $('#notice').textContent = `生成完成 · ${result.seconds.toFixed(1)} 秒`;
+  let warning = result.verificationSaveFailed ? ' · 验证状态未保存' : '';
+  if (!warning) {
+    try {
+      saved = await send({type: 'cloud-load'});
+      providerFields();
+    } catch { warning = ' · 验证状态未刷新'; }
+  }
+  $('#notice').textContent = `生成完成 · ${result.seconds.toFixed(1)} 秒${warning}`;
 });
 
-Promise.all([send({type: 'cloud-load'}), chrome.storage.local.get(['generationMode', 'token']),
-  chrome.runtime.sendMessage({type:'codex-detect'}), Pairing.ready])
-  .then(([config, local, detection]) => {
-    if (detection?.found) $('#mode').add(new Option('本机 Codex', 'codex'));
-    const firstUse = !local.generationMode && !local.token && !Object.values(config.configs).some(c => c.hasKey);
-    saved = config;
-    const missing = config.mode === 'codex' && !detection?.found;
-    $('#mode').value = firstUse || missing ? 'cloud' : config.mode;
-    if (detection?.error || missing) $('#notice').textContent = detection?.error || '未找到 Codex';
-    else if (config.mode === 'codex') $('#notice').textContent = '已启用';
-    $('#provider').value = config.provider;
-    providerFields();
-    visibility();
-    $('#fields').disabled = false;
-  })
-  .catch(error => { $('#notice').textContent = error.message; });
+async function initializeSettings() {
+  const [config, local] = await Promise.all([
+    send({type:'cloud-load'}), chrome.storage.local.get(['generationMode','token'])
+  ]);
+  const firstUse = !local.generationMode && !local.token && !Object.values(config.configs).some(c => c.hasKey);
+  saved = config;
+  const mode = $('#mode');
+  const connect = $('#codex-connect');
+  if (config.mode === 'codex') {
+    mode.add(new Option('本机 Codex','codex'));
+    connect.disabled = true;
+  }
+  mode.value = firstUse ? 'cloud' : config.mode;
+  $('#provider').value = config.provider;
+  providerFields();
+  visibility();
+  $('#fields').disabled = false;
+
+  let detection;
+  try { detection = await send({type:'codex-detect'}); }
+  catch (error) { detection = {found:false,error:error.message}; }
+  const option = mode.querySelector('option[value="codex"]');
+  if (detection.found) {
+    if (!option) mode.add(new Option('本机 Codex','codex'));
+    connect.disabled = false;
+    if (mode.value === 'codex') $('#notice').textContent = '已启用';
+  } else if (option) {
+    if (mode.value === 'codex') {
+      mode.value = 'cloud';
+      visibility();
+      $('#notice').textContent = detection.error || '未找到 Codex';
+    }
+    option.remove();
+  }
+}
+initializeSettings().catch(error => { $('#notice').textContent = error.message; });

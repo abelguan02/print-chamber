@@ -135,7 +135,7 @@
         if (ticket !== version) return;
         const provider=result.provider==='codex'?'Codex':result.provider && result.provider!=='local'?'云端':'本地';
         state('ready',result.fromHistory?`历史打印 · ${provider}结果`:
-          `${result.cached?'已打印':provider+'打印'} · ${Number(result.seconds||((performance.now()-started)/1000)).toFixed(1)} 秒${result.historyError?' · 记录保存失败':''}`);
+          `${result.cached?'已打印':provider+'打印'} · ${Number(result.seconds||((performance.now()-started)/1000)).toFixed(1)} 秒${result.historyError?' · 记录保存失败':''}${result.verificationSaveFailed?' · 验证状态未保存':''}`);
         if(result.fromHistory)$('.caption').title=[result.provider||'local',result.model].filter(Boolean).join(' · ');
         panel.dataset.totalMs = String(Math.round(performance.now() - enteredAt));
         markPrinted(img.element);

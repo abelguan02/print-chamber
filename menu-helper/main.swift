@@ -76,12 +76,16 @@ struct RuntimePaths {
     }
 
     var extensionStatus: String {
-        struct Seen: Decodable { let version: String }
+        struct Seen: Decodable { let version: String; let time: String }
         let file = state.appendingPathComponent("extension-seen.json")
         guard FileManager.default.fileExists(atPath: file.path) else { return "未加载" }
         do {
             let seen = try JSONDecoder().decode(Seen.self, from: Data(contentsOf: file))
-            return "已连接 · v" + seen.version
+            let format = ISO8601DateFormatter()
+            format.formatOptions.insert(.withFractionalSeconds)
+            guard let date = format.date(from: seen.time) ?? ISO8601DateFormatter().date(from: seen.time),
+                  date <= Date() else { return "配对记录无效" }
+            return -date.timeIntervalSinceNow <= 7 * 24 * 3600 ? "已连接 · v" + seen.version : "未加载"
         } catch { return "配对记录无效" }
     }
 
@@ -237,10 +241,6 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
         stopItem = item("停止模型", #selector(stopModel), menu)
         restartItem = item("重启模型", #selector(restartModel), menu)
         startItem.isEnabled = false; stopItem.isEnabled = false; restartItem.isEnabled = false
-        if !paths.appMode {
-            let hint = NSMenuItem(title: "仅手动启动 · 不随登录加载模型", action: nil, keyEquivalent: "")
-            hint.isEnabled = false; menu.addItem(hint)
-        }
         menu.addItem(.separator())
         copyItem = item("复制插件连接码", #selector(copyToken), menu)
         for entry in [startItem, stopItem, restartItem, copyItem] { entry?.isHidden = interpreter == nil }
@@ -371,7 +371,7 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         copyItem?.isEnabled = installed && modelJob != .remove
         guard paths.appMode else { return }
-        let enoughSpace = ((try? installer.capacity(paths.state)) ?? 0) >= ModelInstaller.minimumSpace
+        let enoughSpace = ((try? installer.capacity(paths.state)) ?? 0) >= installer.requiredSpace
         modelAction.isEnabled = true
         if modelJob == .remove {
             modelLabel.stringValue = "正在删除"
@@ -701,8 +701,8 @@ final class Helper: NSObject, NSApplicationDelegate, NSWindowDelegate {
 }
 
 func requiresAppMove(_ bundleURL: URL) -> Bool {
-    let components = bundleURL.standardizedFileURL.pathComponents
-    return components.dropFirst().first == "Volumes" || components.contains("AppTranslocation")
+    if bundleURL.pathComponents.contains("AppTranslocation") { return true }
+    return (try? bundleURL.resourceValues(forKeys: [.volumeIsReadOnlyKey]).volumeIsReadOnly) == true
 }
 
 // Exercise the packaged startup paths and menu without installing a status-bar item.

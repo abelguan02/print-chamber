@@ -129,6 +129,12 @@ test('cloud settings, private keys, trial and explicit print with history reuse'
   const source='https://www.artstation.com/cloud-regression';
   await context.route(source,r=>r.fulfill({contentType:'text/html',body:'<body style="padding:80px"><img id="art" width="240" height="360" src="https://cdna.artstation.com/cloud.png"></body>'}));
   await context.route('https://cdna.artstation.com/cloud.png',r=>r.fulfill({contentType:'image/png',body:fs.readFileSync(require('./browser-options.cjs').fixture)}));
+  await worker.evaluate(()=>{CloudConfig.verified=async()=>{throw Error('fixture verification store failure');};});
+  await settings.setInputFiles('#file',fixture);
+  await completeAction('#trial');
+  assert.match(await settings.locator('#notice').innerText(),/生成完成.*验证状态未保存/);
+  assert.ok(await settings.locator('#preview').isVisible());
+  assert.equal(await settings.locator('#download').getAttribute('href'),await settings.locator('#preview').getAttribute('src'));
   const posts=await worker.evaluate(()=>requests.filter(r=>r.method==='POST').length);
   const page=await context.newPage();await page.goto(source);await page.locator('#art').hover();
   const host=page.locator('print-chamber-overlay');await host.locator('.panel.waiting').waitFor({timeout:5000});await host.hover();
@@ -137,7 +143,7 @@ test('cloud settings, private keys, trial and explicit print with history reuse'
   assert.equal(await worker.evaluate(()=>requests.filter(r=>r.method==='POST').length),posts,'hover must not call a paid endpoint');
   await host.locator('.retry').click();await host.locator('.panel.ready').waitFor({timeout:15000});
   assert.equal(await worker.evaluate(()=>requests.filter(r=>r.method==='POST').length),posts+1);
-  assert.match(await host.locator('.caption').innerText(),/云端打印/);
+  assert.match(await host.locator('.caption').innerText(),/云端打印.*验证状态未保存/);
   const storage=await worker.evaluate(()=>chrome.storage.local.get(null));assert.equal(storage.history.length,1);assert.equal(storage.history[0].provider,'google');assert.equal(storage.token,undefined);
   assert.equal(storage.history[0].promptHash.length,64);
   await page.reload();await page.locator('#art').hover();await host.locator('.panel.ready').waitFor({timeout:5000});await host.hover();

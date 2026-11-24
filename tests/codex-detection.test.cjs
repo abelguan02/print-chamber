@@ -73,3 +73,22 @@ test('the production print accepts one matching tool result from a simulated app
   assert.equal(image.referenceHashMatched,true);assert.equal(image.format,'PNG');
   assert.deepEqual(calls,['thread/start','turn/start']);
 });
+
+test('a status-only or unreadable item still accepts the final image from the same turn', {skip:process.platform!=='darwin'},async t=>{
+  const fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
+  const result=await fs.readFile(path.join(__dirname,'fixtures/artwork.png'),'base64');
+  for (const initial of [{},{result:'invalid fixture'}]) {
+    const temp=await fs.mkdtemp(path.join(os.tmpdir(),'pc-final-image-'));
+    t.after(()=>fs.rm(temp,{recursive:true,force:true}));
+    const item={id:'image',type:'imageGeneration',status:'completed'};
+    let notify;
+    const client={disconnected:new Promise(()=>{}),request:async method=>{
+      assert.equal(method,'turn/start');
+      notify('item/completed',{threadId:'T',turnId:'U',item:{...item,...initial}});
+      notify('turn/completed',{threadId:'T',turn:{id:'U',items:[{...item,result}]}});
+      return {turn:{id:'U'}};
+    }};
+    const image=await printTurn({client,threadId:'T',listen:fn=>{notify=fn;},temp,inputPath:path.join(temp,'fixture'),sourceSha:'a'.repeat(64),prompt:'fixture'});
+    assert.equal(await fs.readFile(path.join(temp,image.outputImage),'base64'),result);
+  }
+});

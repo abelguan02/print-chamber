@@ -5,11 +5,47 @@ import os
 from pathlib import Path
 import plistlib
 import subprocess
+import shlex
 import tempfile
 import unittest
 
+from build_dmg import release_command
+from check_tag import check_tag
+
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / 'dist'
+
+
+class ReleaseTagTests(unittest.TestCase):
+    def test_draft_checks_remote_tag_and_targets_exact_build_commit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            def git(*args):
+                return subprocess.check_output(['git', *args], cwd=repo, text=True).strip()
+            git('init', '-q')
+            git('remote', 'add', 'origin', str(repo))
+            git('config', 'user.name', 'Fixture')
+            git('config', 'user.email', 'fixture@example.invalid')
+            git('commit', '-q', '--allow-empty', '-m', 'build')
+            commit = git('rev-parse', 'HEAD')
+            tag = 'v0.4.0'
+            command = shlex.split(release_command('0.4.0','build.dmg',commit))
+            self.assertEqual(command[:7], ['python3','-B','release/check_tag.py',tag,commit,'&&','gh'])
+            self.assertIn('dist/build.dmg', command)
+            self.assertEqual(command[-3:], ['--draft','--target',commit])
+            check_tag(tag, commit, repo)
+            self.assertEqual(git('tag', '--list'), '')
+            git('commit', '-q', '--allow-empty', '-m', 'later')
+            later = git('rev-parse', 'HEAD')
+            for flags in [[], ['-a', '-m', 'annotated']]:
+                git('tag', *flags, tag, commit)
+                check_tag(tag, commit, repo)
+                with self.assertRaisesRegex(SystemExit, '不一致'):
+                    check_tag(tag, later, repo)
+                git('tag', '-d', tag)
+            git('remote', 'remove', 'origin')
+            with self.assertRaises(subprocess.CalledProcessError):
+                check_tag(tag, commit, repo)
 
 
 class DiskImageTests(unittest.TestCase):

@@ -10,23 +10,32 @@ const Pairing = (() => {
     return !!result?.available;
   });
   function bindManualEntry(field) {
+    let errorMessage = '';
     async function lookup(checkOnly) {
-      if (await ready) {
-        const result = await chrome.runtime.sendMessage({type:'pairing-local', checkOnly});
-        field.hidden = result?.paired === true;
-        if (!result || result.error) throw Error(result?.error || '本机助手未响应');
-        return field.hidden;
-      }
+      errorMessage = '';
+      try {
+        if (await ready) {
+          const result = await chrome.runtime.sendMessage({type:'pairing-local', checkOnly});
+          if (!result || result.error) throw Error(result?.error || '本机助手未响应');
+          field.hidden = result.paired === true;
+          return field.hidden;
+        }
+      } catch (error) { errorMessage = error.message; }
       field.hidden = false;
       return false;
     }
-    // Inspect on open without replacing an existing manual code or triggering a health check.
-    const inspected = lookup(true).catch(() => { field.hidden = false; });
-    return async function localToken() {
-      await inspected;
-      if (!await lookup(false)) return null;
-      return (await chrome.storage.local.get('token')).token;
+    const inspected = lookup(true);
+    return {
+      get error() { return errorMessage; },
+      async localToken() {
+        await inspected;
+        if (!await lookup(false)) return null;
+        return (await chrome.storage.local.get('token')).token;
+      }
     };
   }
-  return {ready, bindManualEntry};
+  function compatibleHealth(health) {
+    return health && ['ready','failed','busy'].every(key => typeof health[key] === 'boolean');
+  }
+  return {ready, bindManualEntry, compatibleHealth};
 })();

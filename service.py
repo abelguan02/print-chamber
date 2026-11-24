@@ -18,6 +18,7 @@ from runtime_config import STATE, settings
 
 ROOT = Path(__file__).resolve().parent
 PORT = 8877
+EXTENSION_ORIGIN = 'chrome-extension://nbdbaigecomblojcdodphghghfbhicpe'
 UPLOAD_TIMEOUT = 15
 STATE.mkdir(exist_ok=True, mode=0o700)
 STATE.chmod(0o700)
@@ -111,8 +112,7 @@ class Handler(BaseHTTPRequestHandler):
         host = self.headers.get('Host', '')
         origin = self.headers.get('Origin')
         return host in (f'127.0.0.1:{PORT}', f'localhost:{PORT}') and (
-            not origin or origin in (f'http://127.0.0.1:{PORT}', f'http://localhost:{PORT}')
-            or (origin.startswith('chrome-extension://') and len(origin.removeprefix('chrome-extension://')) == 32))
+            origin is None or origin in (f'http://127.0.0.1:{PORT}', f'http://localhost:{PORT}', EXTENSION_ORIGIN))
 
     def respond(self, status, body, mime='application/json'):
         if not isinstance(body, bytes):

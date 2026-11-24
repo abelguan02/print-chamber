@@ -13,6 +13,8 @@ test('Local setup: first use, state checks, shared token persistence and cloud m
   await popup.goto(base+'/popup.html');
   await popup.waitForFunction(()=>document.querySelector('a[href="settings.html"]').hidden);
   await popup.locator('#token').waitFor();
+  assert.equal(await popup.locator('#help-text').count(),0);
+  assert.equal(await popup.locator('#recent .empty').innerText(),'暂无打印记录');
   assert.equal(await popup.locator('#save').innerText(),'打开生成设置');
   assert.equal(healthRequests,0,'First use must not attempt a local connection');
   const [page]=await Promise.all([context.waitForEvent('page'),popup.click('#save')]);
@@ -25,6 +27,12 @@ test('Local setup: first use, state checks, shared token persistence and cloud m
   assert.equal(await page.locator('.hint, details, .consent').count(),0);
   await page.click('#local-check');assert.equal(await page.locator('#local-status').innerText(),'未配置');
   await worker.evaluate(()=>chrome.storage.local.set({generationMode:'cloud'}));
+  await page.click('#save-settings');
+  await page.waitForFunction(()=>document.querySelector('#notice').textContent==='请先填写本地连接码');
+  assert.deepEqual(await worker.evaluate(()=>chrome.storage.local.get(['generationMode','token'])),{generationMode:'cloud'});
+  await popup.waitForFunction(()=>document.querySelector('#status').textContent==='云端 · 未验证');
+  await worker.evaluate(()=>chrome.storage.local.set({cloudVerified:true}));
+  await popup.waitForFunction(()=>document.querySelector('#status').textContent==='云端 · 已验证');
   await page.fill('#local-token','test-local-only');
   await page.evaluate(()=>{window.healthCase='ready';window.fetch=async(url,options)=>{
    if(url!=='http://127.0.0.1:8877/health'||options.headers.Authorization!=='Bearer test-local-only')throw Error('Unexpected request');

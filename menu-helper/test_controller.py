@@ -1,6 +1,11 @@
 import importlib.util
 from pathlib import Path
 import unittest
+import os
+import subprocess
+import sys
+import tempfile
+import time
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -36,6 +41,40 @@ class LifecycleTests(unittest.TestCase):
     def test_relative_script_requires_matching_directory(self):
         with patch.object(c,'command',side_effect=['99','python service.py','p99\nn/tmp/other']):
             self.assertEqual(c.owner(),(99,False))
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'macOS controller uses lsof')
+    def test_moved_app_retains_only_its_own_listener(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = Path(temp).resolve()
+            app = state / 'Original.app'
+            resources = app / 'Contents/Resources'
+            resources.mkdir(parents=True)
+            script = resources / 'service.py'
+            port_file = state / 'port'
+            script.write_text("import socket,time\nfrom pathlib import Path\n"
+                              "s=socket.socket(); s.bind(('127.0.0.1',0)); s.listen()\n"
+                              f"Path({str(port_file)!r}).write_text(str(s.getsockname()[1]))\n"
+                              "time.sleep(30)\n")
+            with (state / 'service.log').open('ab') as log:
+                child = subprocess.Popen([sys.executable, str(script)], cwd=resources, stdout=log, stderr=log)
+                try:
+                    deadline = time.monotonic() + 5
+                    while not port_file.exists() and time.monotonic() < deadline:
+                        self.assertIsNone(child.poll(), (state / 'service.log').read_text())
+                        time.sleep(.02)
+                    moved = state / 'Moved.app'
+                    app.rename(moved)
+                    with patch.dict(os.environ, PRINT_CHAMBER_MODE='app'), patch.object(c, 'STATE', state), \
+                            patch.object(c, 'ROOT', moved / 'Contents/Resources'), patch.object(c, 'PORT', int(port_file.read_text())):
+                        self.assertEqual(c.owner(), (child.pid, True))
+                        # A different private log must never authorize signaling the listener.
+                        log_path = state / 'service.log'
+                        log_path.rename(state / 'other.log')
+                        log_path.touch()
+                        self.assertEqual(c.owner(), (child.pid, False))
+                finally:
+                    child.terminate()
+                    child.wait(timeout=5)
 
     def test_busy_generation_is_not_restarted(self):
         with patch.object(c,'status',return_value={'state':'busy'}), patch.object(c,'stop') as stop, patch.object(c,'start') as start:

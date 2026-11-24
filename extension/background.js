@@ -62,7 +62,6 @@ async function generate(message, tab) {
     }else if(generationMode==='cloud'){
       const config=await CloudConfig.active();
       data=await cloudGenerate(config,blob);
-      await CloudConfig.verified(config);
     }else{
     const response = await fetch(ENDPOINT + '/generate', {
       method: 'POST', headers: {'Content-Type': 'application/octet-stream', 'Authorization': 'Bearer ' + token,
@@ -99,7 +98,12 @@ async function generate(message, tab) {
 async function cloudGenerate(config,blob){
   // Keep the MV3 worker alive during a user-requested long-running image call.
   const keepAlive=setInterval(()=>chrome.runtime.getPlatformInfo().catch(()=>{}),20000);
-  try{return await Cloud.generate(config,blob,CLOUD_PROMPT);}finally{clearInterval(keepAlive);}
+  try {
+    const result = await Cloud.generate(config,blob,CLOUD_PROMPT);
+    try { await CloudConfig.verified(config); }
+    catch { result.verificationSaveFailed = true; }
+    return result;
+  } finally { clearInterval(keepAlive); }
 }
 
 async function cloudAction(message){
@@ -121,7 +125,7 @@ async function cloudAction(message){
     if(message.type==='cloud-trial'){
       if(message.confirmed!==true || typeof message.data!=='string' || message.data.length>5000000 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(message.data))throw Error('请选择参考图并确认试生成费用');
       const blob=await (await fetch(message.data)).blob();
-      const result=await cloudGenerate(c,blob);await CloudConfig.verified(c);return result;
+      return await cloudGenerate(c,blob);
     }
     throw Error('不支持的操作');
   }finally{busy=false;}
@@ -179,17 +183,28 @@ async function pairingStatus() {
   } catch { return {available:false, update:false}; }
 }
 async function pairLocal(checkOnly) {
-  const {token} = await codexRequest({type:'local-token'});
+  const result = await codexRequest({type:'local-token'});
+  if (result.error) throw Error(result.error);
+  const {token} = result;
   if (!token) return {paired:false};
   if (!checkOnly) await chrome.storage.local.set({token});
   return {paired:true};
 }
-// Each worker startup announces the version Chrome actually loaded.
+// Concurrent pairing requests share one native connection.
 let pendingHello;
 function hello() {
-  return pendingHello ??= pairingStatus().finally(() => { pendingHello = null; });
+  return pendingHello ??= pairingStatus().then(async status => {
+    if (status.available) await chrome.storage.session.set({lastPairingHello:Date.now()});
+    return status;
+  }).finally(() => { pendingHello = null; });
 }
-hello().catch(() => {});
+async function announceOnWake() {
+  const {lastPairingHello} = await chrome.storage.session.get('lastPairingHello');
+  if (lastPairingHello && Date.now() - lastPairingHello < 3600000) return;
+  await hello();
+}
+announceOnWake().catch(() => {});
+chrome.runtime.onInstalled.addListener(hello);
 chrome.runtime.onStartup?.addListener(hello);
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if(typeof message?.type!=='string')return;
@@ -197,7 +212,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     const trusted = ['settings.html','popup.html'].some(page => sender.url === chrome.runtime.getURL(page));
     if (sender.id !== chrome.runtime.id || !trusted) { reply({error:'仅扩展配置页面可配对'}); return; }
     const operation = message.type === 'pairing-status' ? hello() : pairLocal(message.checkOnly === true);
-    operation.then(reply).catch(() => reply({error:'无法取得本地连接码'}));
+    operation.then(reply).catch(error => reply({error:error.message || '无法取得本地连接码'}));
     return true;
   }
   if(message.type.startsWith('cloud-') || ['codex-detect','codex-connect'].includes(message.type)){
